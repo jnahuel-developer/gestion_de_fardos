@@ -1,0 +1,16 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Logs and local artifacts
+logs/
+*.log
+
+## OS files
+.DS_Store
+Thumbs.db

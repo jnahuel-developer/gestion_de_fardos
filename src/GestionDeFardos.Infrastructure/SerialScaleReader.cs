@@ -159,7 +159,7 @@ public sealed class SerialScaleReader : IScaleReader
         while (TryReadLine(_buffer, out var line))
         {
             var grams = TryExtractFirstInteger(line);
-            var kilograms = grams.HasValue ? WeightConversionHelper.GramsToKg(grams.Value) : null;
+            decimal? kilograms = grams.HasValue ? WeightConversionHelper.GramsToKg(grams.Value) : null;
 
             _snapshot.RawFrame = line;
             _snapshot.RawGrams = grams;

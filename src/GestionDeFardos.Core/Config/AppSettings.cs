@@ -16,6 +16,7 @@ public sealed class ScaleSettings
     public int DataBits { get; set; } = 8;
     public string Parity { get; set; } = "None";
     public string StopBits { get; set; } = "One";
+    public string NewLine { get; set; } = "\n";
 }
 
 public sealed class ButtonSettings

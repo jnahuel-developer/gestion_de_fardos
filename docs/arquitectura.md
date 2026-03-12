@@ -26,3 +26,12 @@
 ## Portabilidad y permisos
 
 Se debe instalar la aplicación en una carpeta con permisos de escritura para permitir persistencia local de configuración, base de datos y logs.
+
+## Lectura de balanza en Service (gramos ASCII → kg)
+
+- `ServiceForm` inicia un `IScaleReader` al mostrarse y lo detiene al cerrarse.
+- La implementación actual es `SerialScaleReader` (Infrastructure), basada en `System.IO.Ports.SerialPort`.
+- La lectura se realiza en `DataReceived`: se acumula texto ASCII hasta línea completa y se procesa el primer entero encontrado como gramos.
+- Conversión de unidades: gramos a kilogramos mediante `WeightConversionHelper.GramsToKg`.
+- Estado expuesto por snapshot thread-safe (`ScaleSnapshot`): última trama ASCII, gramos crudos, kg, fecha de actualización, estado de conexión y último error.
+- Parámetros seriales leídos de `config.json` (`Scale.PortName`, `Scale.BaudRate`, `Scale.Parity`, `Scale.DataBits`, `Scale.StopBits`, `Scale.NewLine`).

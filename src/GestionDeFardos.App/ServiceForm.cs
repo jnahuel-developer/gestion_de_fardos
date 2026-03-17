@@ -1,19 +1,22 @@
 using GestionDeFardos.Core.Interfaces;
+using GestionDeFardos.Core.Models;
 
 namespace GestionDeFardos.App;
 
 public sealed class ServiceForm : Form
 {
-    private readonly IScaleReader _scaleReader;
+    private readonly IServicePortMonitor _servicePortMonitor;
     private readonly Label _pesoActualLabel;
     private readonly Label _tramaLabel;
     private readonly Label _conexionLabel;
     private readonly Label _errorLabel;
+    private readonly Label _buttonStateLabel;
+    private readonly Label _buttonActivityLabel;
     private readonly System.Windows.Forms.Timer _refreshTimer;
 
-    public ServiceForm(IScaleReader scaleReader)
+    public ServiceForm(IServicePortMonitor servicePortMonitor)
     {
-        _scaleReader = scaleReader;
+        _servicePortMonitor = servicePortMonitor;
 
         Text = "Modo Service";
         StartPosition = FormStartPosition.CenterParent;
@@ -22,7 +25,7 @@ public sealed class ServiceForm : Form
 
         var descriptionLabel = new Label
         {
-            Text = "Módulo Service - Lectura de balanza serial",
+            Text = "Módulo Service - Diagnóstico de balanza y pulsador",
             AutoSize = true,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             Location = new Point(20, 20)
@@ -75,22 +78,22 @@ public sealed class ServiceForm : Form
             Size = new Size(640, 90)
         };
 
-        var estadoLabel = new Label
+        _buttonStateLabel = new Label
         {
-            Text = "Estado: (pendiente)",
+            Text = "Estado: Sin lectura",
             AutoSize = true,
             Location = new Point(16, 30)
         };
 
-        var ultimoEventoLabel = new Label
+        _buttonActivityLabel = new Label
         {
-            Text = "Último evento: (pendiente)",
+            Text = "Última opresión: --",
             AutoSize = true,
             Location = new Point(16, 55)
         };
 
-        pulsadorGroup.Controls.Add(estadoLabel);
-        pulsadorGroup.Controls.Add(ultimoEventoLabel);
+        pulsadorGroup.Controls.Add(_buttonStateLabel);
+        pulsadorGroup.Controls.Add(_buttonActivityLabel);
 
         var administracionGroup = new GroupBox
         {
@@ -114,8 +117,8 @@ public sealed class ServiceForm : Form
         Controls.Add(pulsadorGroup);
         Controls.Add(administracionGroup);
 
-        _refreshTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-        _refreshTimer.Tick += (_, _) => RefreshScaleData();
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = 200 };
+        _refreshTimer.Tick += (_, _) => RefreshServiceData();
 
         Shown += OnServiceFormShown;
         FormClosed += OnServiceFormClosed;
@@ -123,20 +126,20 @@ public sealed class ServiceForm : Form
 
     private void OnServiceFormShown(object? sender, EventArgs e)
     {
-        _scaleReader.Start();
-        RefreshScaleData();
+        _servicePortMonitor.Start();
+        RefreshServiceData();
         _refreshTimer.Start();
     }
 
     private void OnServiceFormClosed(object? sender, FormClosedEventArgs e)
     {
         _refreshTimer.Stop();
-        _scaleReader.Stop();
+        _servicePortMonitor.Stop();
     }
 
-    private void RefreshScaleData()
+    private void RefreshServiceData()
     {
-        var snapshot = _scaleReader.GetSnapshot();
+        var snapshot = _servicePortMonitor.GetSnapshot();
 
         _pesoActualLabel.Text = snapshot.WeightKg.HasValue
             ? $"Peso actual: {snapshot.WeightKg.Value:F3} kg"
@@ -153,5 +156,33 @@ public sealed class ServiceForm : Form
         _errorLabel.Text = string.IsNullOrWhiteSpace(snapshot.LastError)
             ? "Error: --"
             : $"Error: {snapshot.LastError}";
+
+        _buttonStateLabel.Text = $"Estado: {FormatButtonState(snapshot.ButtonState)}";
+        _buttonActivityLabel.Text = FormatButtonActivity(snapshot);
+    }
+
+    private static string FormatButtonState(ServiceButtonState buttonState)
+    {
+        return buttonState switch
+        {
+            ServiceButtonState.Pressed => "Presionado",
+            ServiceButtonState.Released => "No presionado",
+            _ => "Sin lectura"
+        };
+    }
+
+    private static string FormatButtonActivity(ServicePortSnapshot snapshot)
+    {
+        if (snapshot.LastButtonPressedAt.HasValue)
+        {
+            return $"Última opresión: {snapshot.LastButtonPressedAt.Value:dd/MM/yyyy HH:mm:ss.fff}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.ButtonLastError))
+        {
+            return $"Diagnóstico: {snapshot.ButtonLastError}";
+        }
+
+        return "Última opresión: --";
     }
 }

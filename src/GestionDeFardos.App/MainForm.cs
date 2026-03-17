@@ -168,8 +168,8 @@ public sealed class MainForm : Form
             return;
         }
 
-        var scaleReader = new SerialScaleReader(_settings.Scale);
-        _serviceForm = new ServiceForm(scaleReader);
+        var servicePortMonitor = new SerialServicePortMonitor(_settings.Scale, _settings.Button);
+        _serviceForm = new ServiceForm(servicePortMonitor);
         _serviceForm.FormClosed += (_, _) => _serviceForm = null;
         _serviceForm.Show(this);
         _serviceForm.Activate();

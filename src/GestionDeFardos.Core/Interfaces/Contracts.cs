@@ -3,16 +3,11 @@ using GestionDeFardos.Core.Models;
 
 namespace GestionDeFardos.Core.Interfaces;
 
-public interface IScaleReader
+public interface IServicePortMonitor
 {
     void Start();
     void Stop();
-    ScaleSnapshot GetSnapshot();
-}
-
-public interface IButtonReader
-{
-    Task<bool> ReadStateAsync(CancellationToken cancellationToken = default);
+    ServicePortSnapshot GetSnapshot();
 }
 
 public interface IWeighingRepository

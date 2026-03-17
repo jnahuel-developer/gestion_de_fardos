@@ -8,8 +8,7 @@
     "NewLine": "\\n"
   },
   "Button": {
-    "PortName": "COM4",
-    "BaudRate": 9600
+    "InputLine": "Cts"
   },
   "Thresholds": {
     "MinKg": 20.0,

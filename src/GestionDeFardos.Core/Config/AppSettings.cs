@@ -21,8 +21,13 @@ public sealed class ScaleSettings
 
 public sealed class ButtonSettings
 {
-    public string PortName { get; set; } = "COM2";
-    public int BaudRate { get; set; } = 9600;
+    public string InputLine { get; set; } = nameof(ButtonInputLine.Cts);
+}
+
+public enum ButtonInputLine
+{
+    Cts,
+    Dsr
 }
 
 public sealed class ThresholdSettings

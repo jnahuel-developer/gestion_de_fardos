@@ -2,45 +2,50 @@
 
 ## Capas
 
-- **GestionDeFardos.App**: interfaz WinForms y composicion de la aplicacion.
-- **GestionDeFardos.Core**: modelos, contratos y reglas de negocio puras.
-- **GestionDeFardos.Infrastructure**: implementaciones tecnicas y acceso a puertos/configuracion.
+- **GestionDeFardos.App**: interfaz WinForms, composicion de la aplicacion y acceso al modo Service.
+- **GestionDeFardos.Core**: modelos, contratos y reglas puras.
+- **GestionDeFardos.Infrastructure**: configuracion, puerto serial, logging a archivo y packaging tecnico.
 
 ## Ubicaciones de archivos
 
 - Configuracion: `AppContext.BaseDirectory/config.json`.
-- Base de datos SQLite: `AppContext.BaseDirectory`.
-- Logs: `./logs` relativo al ejecutable.
+- Logs: `AppContext.BaseDirectory/logs`.
+- Artefactos de release: `artifacts/`.
 
 ## Acceso a Modo Service
 
-- El acceso se inicia desde `MainForm` mediante `WM_HOTKEY` (WinAPI).
+- El acceso se inicia desde `MainForm` mediante `WM_HOTKEY`.
 - Se registran dos combinaciones:
   - `Ctrl+Shift+S`
   - `Ctrl+Alt+Shift+S`
-- Si la hotkey no puede registrarse (por conflicto con otra app), se muestra advertencia y la app continua.
-- Al detectar hotkey se solicita contrasena en un dialogo modal.
-- La validacion se realiza contra `Passwords.Service` leido desde `config.json`.
+- Al detectar la hotkey se solicita contrasena y, si es correcta, se abre `ServiceForm`.
 - Si `ServiceForm` ya esta abierta, no se crea una nueva instancia; se trae al frente.
 
 ## Monitoreo serial compartido en Service
 
 - `ServiceForm` inicia un `IServicePortMonitor` al mostrarse y lo detiene al cerrarse.
-- La implementacion actual es `SerialServicePortMonitor` (Infrastructure), basada en `System.IO.Ports.SerialPort`.
-- Se abre un unico `SerialPort` para balanza y pulsador.
-- La balanza se procesa por `DataReceived`: se acumula texto ASCII hasta linea completa y se procesa el primer entero encontrado como gramos.
-- El pulsador se procesa por `PinChanged`, leyendo una linea de control del mismo puerto y detectando solo el flanco ascendente como nueva opresion.
-- Conversion de unidades: gramos a kilogramos mediante `WeightConversionHelper.GramsToKg`.
-- Estado expuesto por snapshot thread-safe (`ServicePortSnapshot`): ultima trama ASCII, gramos crudos, kg, fecha de actualizacion, estado de conexion, ultimo error de puerto/balanza, estado del pulsador, ultima opresion y ultimo error del pulsador.
+- La implementacion actual es `SerialServicePortMonitor`, basada en un unico `SerialPort`.
+- La balanza se lee por `DataReceived`, acumulando texto ASCII hasta linea completa y extrayendo el primer entero en gramos.
+- El pulsador se detecta por `PinChanged`, evaluando la linea configurada (`CTS` o `DSR`) y detectando solo el flanco ascendente como opresion.
+- El snapshot expone peso convertido, ultima trama ASCII, conexion, error, linea configurada, estado crudo de `CTS/DSR`, estado logico del pulsador y ultima opresion.
+
+## Logging basico
+
+- El contrato comun es `IAppLogger`.
+- La implementacion actual es `FileAppLogger`.
+- Los eventos se persisten en `./logs/gestion-de-fardos-YYYYMMDD.log`.
+- Se registran inicio/cierre de app, eventos de Service, apertura/cierre de puerto, tramas de balanza, cambios de lineas de control y errores.
 
 ## Configuracion serial relevante
 
 - `Scale.PortName`, `Scale.BaudRate`, `Scale.Parity`, `Scale.DataBits`, `Scale.StopBits`, `Scale.NewLine`.
-- `Button.InputLine` define que linea de entrada observa la app (`Cts` o `Dsr`).
-- Para las pruebas con el simulador:
-  - `--button-line rts` en el simulador implica `Button.InputLine = Cts` en la app.
-  - `--button-line dtr` en el simulador implica `Button.InputLine = Dsr` en la app.
+- `Button.InputLine` define la linea de entrada observada por la app (`Cts` o `Dsr`).
+- Para pruebas con el simulador:
+  - `--button-line rts` implica `Button.InputLine = Cts`.
+  - `--button-line dtr` implica `Button.InputLine = Dsr`.
 
-## Portabilidad y permisos
+## Release e instalador
 
-Se debe instalar la aplicacion en una carpeta con permisos de escritura para permitir persistencia local de configuracion, base de datos y logs.
+- La publicacion de entrega se genera self-contained `win-x64`.
+- El instalador se arma con Inno Setup a partir de la carpeta publicada.
+- La ruta por defecto es `C:\GestionDeFardos`, fuera de `Program Files`, para permitir `config.json` y `logs` junto al ejecutable.

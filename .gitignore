@@ -10,6 +10,7 @@ obj/
 ## Logs and local artifacts
 logs/
 *.log
+artifacts/
 
 ## OS files
 .DS_Store

@@ -3,50 +3,67 @@
 ## Acceso a Modo Service
 
 1. Con la aplicacion abierta, presione `Ctrl+Shift+S` o `Ctrl+Alt+Shift+S`.
-2. Se abrira un cuadro modal con el texto **Ingrese contrasena de Service**.
-3. Ingrese la contrasena y presione **Aceptar** (o `Enter`).
-4. Para cancelar, use **Cancelar** (o `Esc`), sin cambios en pantalla.
-5. Si la contrasena es correcta, se abrira la pantalla **Modo Service**.
-6. Si la contrasena es incorrecta, se mostrara un mensaje de acceso denegado.
-7. Si **Modo Service** ya esta abierto, la hotkey lo trae al frente.
+2. Se abrira un cuadro modal para ingresar la contrasena de Service.
+3. Ingrese la contrasena y presione **Aceptar**.
+4. Si la contrasena es correcta, se abrira la pantalla **Modo Service**.
+5. Si la contrasena es incorrecta, se mostrara un mensaje de acceso denegado.
 
-## Nota de configuracion
+## Configuracion de `config.json`
 
-- La contrasena se toma de `config.json` en la carpeta del ejecutable (`AppContext.BaseDirectory`).
-- Debe existir `Passwords.Service` con el valor esperado.
-
-## Ubicacion y contenido de config.json
-
-- El archivo `config.json` debe ubicarse en `AppContext.BaseDirectory` (misma carpeta del ejecutable).
-- Puede copiarse desde `samples/config.example.json` y luego ajustar valores.
-- Para habilitar acceso a Service, `Passwords.Service` debe existir y contener un valor no vacio.
+- El archivo debe ubicarse en `AppContext.BaseDirectory`.
+- Puede copiarse desde `samples/config.example.json`.
+- `Passwords.Service` debe existir y contener un valor no vacio.
 
 ## Configuracion de balanza serial
 
-En la seccion `Scale` de `config.json` se deben completar:
+En la seccion `Scale` se deben completar:
 
-- `PortName`: puerto serial de la balanza (ejemplo `COM3`).
-- `BaudRate`: velocidad serial (ejemplo `9600`).
-- `Parity`: paridad (`None`, `Odd`, `Even`, etc.).
-- `DataBits`: cantidad de bits de datos (ejemplo `8`).
-- `StopBits`: bits de parada (`One`, `Two`, etc.).
-- `NewLine`: separador de fin de trama (`"\\n"` o `"\\r\\n"`).
+- `PortName`
+- `BaudRate`
+- `Parity`
+- `DataBits`
+- `StopBits`
+- `NewLine`
 
-## Configuracion del pulsador en el mismo puerto
+## Configuracion del pulsador
 
-En la seccion `Button` de `config.json` se debe completar:
+En la seccion `Button` se debe completar:
 
-- `InputLine`: linea de entrada que observara la app (`Cts` o `Dsr`).
+- `InputLine`: `Cts` o `Dsr`
 
-Mapeo recomendado para pruebas con el simulador:
+Mapeo recomendado para pruebas con simulador:
 
-- Simulador con `--button-line rts`: configurar `Button.InputLine = Cts`.
-- Simulador con `--button-line dtr`: configurar `Button.InputLine = Dsr`.
+- Simulador con `--button-line rts`: usar `Button.InputLine = Cts`
+- Simulador con `--button-line dtr`: usar `Button.InputLine = Dsr`
 
 ## Que muestra la pantalla Service
 
-- Ultima trama ASCII recibida desde la balanza.
-- Peso actual convertido a kg.
+- Peso convertido a kg.
+- Ultima trama ASCII recibida.
 - Estado de conexion del puerto.
-- Estado textual del pulsador: `Presionado`, `No presionado` o `Sin lectura`.
-- Ultima opresion detectada o diagnostico del pulsador si la lectura no esta disponible.
+- Error de puerto o de parseo, si existe.
+- Linea configurada para el pulsador.
+- Estado crudo de `CTS`.
+- Estado crudo de `DSR`.
+- Estado logico del pulsador: `Presionado`, `No presionado` o `Sin lectura`.
+- Ultima opresion detectada o diagnostico del pulsador.
+
+## Logging basico
+
+- Los logs se guardan en `./logs` junto al ejecutable.
+- El archivo diario se llama `gestion-de-fardos-YYYYMMDD.log`.
+- Se registran eventos de balanza, pulsador, errores de puerto y eventos principales de la aplicacion.
+
+## Actualizacion de version
+
+- Para instalar una nueva version en la misma PC, cerrar la aplicacion y ejecutar el nuevo `GestionDeFardos-Setup-...exe`.
+- Instalar siempre sobre la misma carpeta, por ejemplo `C:\GestionDeFardos`.
+- La reinstalacion preserva `config.json`.
+- No hace falta desinstalar antes de instalar la siguiente version.
+
+## Desinstalacion
+
+- Con el instalador actual de esta etapa, la aplicacion no aparece en la desinstalacion estandar de Windows.
+- Si es necesario quitarla, cerrar la aplicacion y eliminar manualmente la carpeta de instalacion.
+- Si existen accesos directos, eliminarlos manualmente.
+- Respaldar `config.json` y `logs` antes de quitarla si se desea conservar informacion.

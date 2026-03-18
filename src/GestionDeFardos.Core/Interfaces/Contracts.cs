@@ -10,6 +10,18 @@ public interface IServicePortMonitor
     ServicePortSnapshot GetSnapshot();
 }
 
+public interface IAppLogger
+{
+    void Log(AppLogLevel level, string category, string message);
+}
+
+public enum AppLogLevel
+{
+    Info,
+    Warning,
+    Error
+}
+
 public interface IWeighingRepository
 {
     Task SaveAsync(WeighingRecord record, CancellationToken cancellationToken = default);

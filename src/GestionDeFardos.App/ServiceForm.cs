@@ -10,6 +10,9 @@ public sealed class ServiceForm : Form
     private readonly Label _tramaLabel;
     private readonly Label _conexionLabel;
     private readonly Label _errorLabel;
+    private readonly Label _buttonLineLabel;
+    private readonly Label _ctsLabel;
+    private readonly Label _dsrLabel;
     private readonly Label _buttonStateLabel;
     private readonly Label _buttonActivityLabel;
     private readonly System.Windows.Forms.Timer _refreshTimer;
@@ -20,12 +23,12 @@ public sealed class ServiceForm : Form
 
         Text = "Modo Service";
         StartPosition = FormStartPosition.CenterParent;
-        Width = 700;
-        Height = 450;
+        Width = 760;
+        Height = 560;
 
         var descriptionLabel = new Label
         {
-            Text = "Módulo Service - Diagnóstico de balanza y pulsador",
+            Text = "Modulo Service - Diagnostico serial de balanza y pulsador",
             AutoSize = true,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             Location = new Point(20, 20)
@@ -35,26 +38,26 @@ public sealed class ServiceForm : Form
         {
             Text = "Balanza",
             Location = new Point(20, 60),
-            Size = new Size(640, 130)
+            Size = new Size(700, 130)
         };
 
         _pesoActualLabel = new Label
         {
-            Text = "Peso actual: -- kg",
+            Text = "Peso convertido: -- kg",
             AutoSize = true,
             Location = new Point(16, 30)
         };
 
         _tramaLabel = new Label
         {
-            Text = "Trama ASCII: --",
+            Text = "Ultima trama ASCII: --",
             AutoSize = true,
             Location = new Point(16, 55)
         };
 
         _conexionLabel = new Label
         {
-            Text = "Conexión: Desconectada",
+            Text = "Conexion: Desconectada",
             AutoSize = true,
             Location = new Point(16, 80)
         };
@@ -74,32 +77,56 @@ public sealed class ServiceForm : Form
         var pulsadorGroup = new GroupBox
         {
             Text = "Pulsador",
-            Location = new Point(20, 200),
-            Size = new Size(640, 90)
+            Location = new Point(20, 205),
+            Size = new Size(700, 165)
         };
 
-        _buttonStateLabel = new Label
+        _buttonLineLabel = new Label
         {
-            Text = "Estado: Sin lectura",
+            Text = "Linea configurada: --",
             AutoSize = true,
             Location = new Point(16, 30)
         };
 
-        _buttonActivityLabel = new Label
+        _ctsLabel = new Label
         {
-            Text = "Última opresión: --",
+            Text = "CTS: --",
             AutoSize = true,
             Location = new Point(16, 55)
         };
 
+        _dsrLabel = new Label
+        {
+            Text = "DSR: --",
+            AutoSize = true,
+            Location = new Point(16, 80)
+        };
+
+        _buttonStateLabel = new Label
+        {
+            Text = "Estado del pulsador: Sin lectura",
+            AutoSize = true,
+            Location = new Point(16, 105)
+        };
+
+        _buttonActivityLabel = new Label
+        {
+            Text = "Ultima opresion / diagnostico: --",
+            AutoSize = true,
+            Location = new Point(16, 130)
+        };
+
+        pulsadorGroup.Controls.Add(_buttonLineLabel);
+        pulsadorGroup.Controls.Add(_ctsLabel);
+        pulsadorGroup.Controls.Add(_dsrLabel);
         pulsadorGroup.Controls.Add(_buttonStateLabel);
         pulsadorGroup.Controls.Add(_buttonActivityLabel);
 
         var administracionGroup = new GroupBox
         {
-            Text = "Administración",
-            Location = new Point(20, 300),
-            Size = new Size(640, 90)
+            Text = "Administracion",
+            Location = new Point(20, 385),
+            Size = new Size(700, 90)
         };
 
         var borradoButton = new Button
@@ -139,26 +166,44 @@ public sealed class ServiceForm : Form
 
     private void RefreshServiceData()
     {
-        var snapshot = _servicePortMonitor.GetSnapshot();
+        ServicePortSnapshot snapshot = _servicePortMonitor.GetSnapshot();
 
         _pesoActualLabel.Text = snapshot.WeightKg.HasValue
-            ? $"Peso actual: {snapshot.WeightKg.Value:F3} kg"
-            : "Peso actual: -- kg";
+            ? $"Peso convertido: {snapshot.WeightKg.Value:F3} kg"
+            : "Peso convertido: -- kg";
 
         _tramaLabel.Text = string.IsNullOrWhiteSpace(snapshot.RawFrame)
-            ? "Trama ASCII: --"
-            : $"Trama ASCII: {snapshot.RawFrame}";
+            ? "Ultima trama ASCII: --"
+            : $"Ultima trama ASCII: {snapshot.RawFrame}";
 
         _conexionLabel.Text = snapshot.IsConnected
-            ? "Conexión: Conectada"
-            : "Conexión: Desconectada";
+            ? "Conexion: Conectada"
+            : "Conexion: Desconectada";
 
         _errorLabel.Text = string.IsNullOrWhiteSpace(snapshot.LastError)
             ? "Error: --"
             : $"Error: {snapshot.LastError}";
 
-        _buttonStateLabel.Text = $"Estado: {FormatButtonState(snapshot.ButtonState)}";
+        _buttonLineLabel.Text = $"Linea configurada: {FormatConfiguredLine(snapshot.ConfiguredButtonLine)}";
+        _ctsLabel.Text = $"CTS: {FormatControlLineState(snapshot.CtsState)}";
+        _dsrLabel.Text = $"DSR: {FormatControlLineState(snapshot.DsrState)}";
+        _buttonStateLabel.Text = $"Estado del pulsador: {FormatButtonState(snapshot.ButtonState)}";
         _buttonActivityLabel.Text = FormatButtonActivity(snapshot);
+    }
+
+    private static string FormatConfiguredLine(string configuredLine)
+    {
+        return string.IsNullOrWhiteSpace(configuredLine) ? "--" : configuredLine;
+    }
+
+    private static string FormatControlLineState(bool? state)
+    {
+        return state switch
+        {
+            true => "Activa",
+            false => "Inactiva",
+            null => "Sin lectura"
+        };
     }
 
     private static string FormatButtonState(ServiceButtonState buttonState)
@@ -175,14 +220,14 @@ public sealed class ServiceForm : Form
     {
         if (snapshot.LastButtonPressedAt.HasValue)
         {
-            return $"Última opresión: {snapshot.LastButtonPressedAt.Value:dd/MM/yyyy HH:mm:ss.fff}";
+            return $"Ultima opresion: {snapshot.LastButtonPressedAt.Value:dd/MM/yyyy HH:mm:ss.fff}";
         }
 
         if (!string.IsNullOrWhiteSpace(snapshot.ButtonLastError))
         {
-            return $"Diagnóstico: {snapshot.ButtonLastError}";
+            return $"Diagnostico: {snapshot.ButtonLastError}";
         }
 
-        return "Última opresión: --";
+        return "Ultima opresion / diagnostico: --";
     }
 }

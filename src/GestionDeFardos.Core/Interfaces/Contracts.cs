@@ -3,14 +3,23 @@ using GestionDeFardos.Core.Models;
 
 namespace GestionDeFardos.Core.Interfaces;
 
-public interface IScaleReader
+public interface IServicePortMonitor
 {
-    Task<decimal?> ReadWeightKgAsync(CancellationToken cancellationToken = default);
+    void Start();
+    void Stop();
+    ServicePortSnapshot GetSnapshot();
 }
 
-public interface IButtonReader
+public interface IAppLogger
 {
-    Task<bool> ReadStateAsync(CancellationToken cancellationToken = default);
+    void Log(AppLogLevel level, string category, string message);
+}
+
+public enum AppLogLevel
+{
+    Info,
+    Warning,
+    Error
 }
 
 public interface IWeighingRepository

@@ -4,11 +4,11 @@
     "BaudRate": 9600,
     "DataBits": 8,
     "Parity": "None",
-    "StopBits": "One"
+    "StopBits": "One",
+    "NewLine": "\\n"
   },
   "Button": {
-    "PortName": "COM4",
-    "BaudRate": 9600
+    "InputLine": "Cts"
   },
   "Thresholds": {
     "MinKg": 20.0,

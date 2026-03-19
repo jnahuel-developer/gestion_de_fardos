@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using GestionDeFardos.Core.Config;
+using GestionDeFardos.Infrastructure;
 using GestionDeFardos.Infrastructure.Config;
 
 namespace GestionDeFardos.App;
@@ -16,10 +17,14 @@ public sealed class MainForm : Form
     private const int HotkeyIdCtrlAltShiftS = 1002;
 
     private readonly AppSettings _settings;
+    private readonly string _configPath;
+    private readonly bool _configFileExists;
     private ServiceForm? _serviceForm;
 
     public MainForm()
     {
+        _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
+        _configFileExists = File.Exists(_configPath);
         _settings = LoadAppSettings();
 
         Text = "Gestión de Fardos";
@@ -50,21 +55,9 @@ public sealed class MainForm : Form
         FormClosed += OnMainFormClosed;
     }
 
-    private static AppSettings LoadAppSettings()
+    private AppSettings LoadAppSettings()
     {
         var configLoader = new ConfigLoader();
-        var configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
-
-        if (!File.Exists(configPath))
-        {
-            MessageBox.Show(
-                $"No se encontró el archivo de configuración '{configPath}'.\n" +
-                "La aplicación continuará con valores por defecto.\n" +
-                "Para configurar la contraseña de Service, cree config.json tomando como base samples/config.example.json.",
-                "Configuración faltante",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-        }
 
         try
         {
@@ -73,7 +66,7 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(
-                "No se pudo cargar config.json. Se utilizarán valores por defecto.\n" +
+                "No se pudo cargar config.json.\n" +
                 $"Detalle: {ex.Message}",
                 "Error de configuración",
                 MessageBoxButtons.OK,
@@ -142,6 +135,11 @@ public sealed class MainForm : Form
 
     private void HandleServiceHotkey()
     {
+        if (!CanOpenServiceMode())
+        {
+            return;
+        }
+
         if (_serviceForm is not null && !_serviceForm.IsDisposed)
         {
             if (_serviceForm.WindowState == FormWindowState.Minimized)
@@ -170,10 +168,38 @@ public sealed class MainForm : Form
             return;
         }
 
-        _serviceForm = new ServiceForm();
+        var scaleReader = new SerialScaleReader(_settings.Scale);
+        _serviceForm = new ServiceForm(scaleReader);
         _serviceForm.FormClosed += (_, _) => _serviceForm = null;
         _serviceForm.Show(this);
         _serviceForm.Activate();
+    }
+
+    private bool CanOpenServiceMode()
+    {
+        if (!_configFileExists)
+        {
+            MessageBox.Show(
+                $"No se encontró config.json en la ruta esperada:\n{_configPath}\n\n" +
+                "Copie samples/config.example.json junto al ejecutable y complete Passwords.Service.",
+                "Acceso a Service bloqueado",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.Passwords.Service))
+        {
+            MessageBox.Show(
+                "El campo Passwords.Service está vacío en config.json.\n" +
+                "Configure una contraseña de Service para habilitar el acceso.",
+                "Acceso a Service bloqueado",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        return true;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

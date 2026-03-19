@@ -5,7 +5,9 @@ namespace GestionDeFardos.Core.Interfaces;
 
 public interface IScaleReader
 {
-    Task<decimal?> ReadWeightKgAsync(CancellationToken cancellationToken = default);
+    void Start();
+    void Stop();
+    ScaleSnapshot GetSnapshot();
 }
 
 public interface IButtonReader

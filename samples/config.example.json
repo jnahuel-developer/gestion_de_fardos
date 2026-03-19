@@ -4,7 +4,8 @@
     "BaudRate": 9600,
     "DataBits": 8,
     "Parity": "None",
-    "StopBits": "One"
+    "StopBits": "One",
+    "NewLine": "\\n"
   },
   "Button": {
     "PortName": "COM4",

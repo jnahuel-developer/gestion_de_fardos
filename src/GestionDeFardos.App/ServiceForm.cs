@@ -1,17 +1,28 @@
+using GestionDeFardos.Core.Interfaces;
+
 namespace GestionDeFardos.App;
 
 public sealed class ServiceForm : Form
 {
-    public ServiceForm()
+    private readonly IScaleReader _scaleReader;
+    private readonly Label _pesoActualLabel;
+    private readonly Label _tramaLabel;
+    private readonly Label _conexionLabel;
+    private readonly Label _errorLabel;
+    private readonly System.Windows.Forms.Timer _refreshTimer;
+
+    public ServiceForm(IScaleReader scaleReader)
     {
+        _scaleReader = scaleReader;
+
         Text = "Modo Service";
         StartPosition = FormStartPosition.CenterParent;
         Width = 700;
-        Height = 420;
+        Height = 450;
 
         var descriptionLabel = new Label
         {
-            Text = "Módulo Service - Sin integración de hardware en esta versión",
+            Text = "Módulo Service - Lectura de balanza serial",
             AutoSize = true,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             Location = new Point(20, 20)
@@ -21,30 +32,46 @@ public sealed class ServiceForm : Form
         {
             Text = "Balanza",
             Location = new Point(20, 60),
-            Size = new Size(640, 90)
+            Size = new Size(640, 130)
         };
 
-        var pesoActualLabel = new Label
+        _pesoActualLabel = new Label
         {
-            Text = "Peso actual: (pendiente)",
+            Text = "Peso actual: -- kg",
             AutoSize = true,
             Location = new Point(16, 30)
         };
 
-        var tramaLabel = new Label
+        _tramaLabel = new Label
         {
-            Text = "Trama ASCII: (pendiente)",
+            Text = "Trama ASCII: --",
             AutoSize = true,
             Location = new Point(16, 55)
         };
 
-        balanzaGroup.Controls.Add(pesoActualLabel);
-        balanzaGroup.Controls.Add(tramaLabel);
+        _conexionLabel = new Label
+        {
+            Text = "Conexión: Desconectada",
+            AutoSize = true,
+            Location = new Point(16, 80)
+        };
+
+        _errorLabel = new Label
+        {
+            Text = "Error: --",
+            AutoSize = true,
+            Location = new Point(16, 105)
+        };
+
+        balanzaGroup.Controls.Add(_pesoActualLabel);
+        balanzaGroup.Controls.Add(_tramaLabel);
+        balanzaGroup.Controls.Add(_conexionLabel);
+        balanzaGroup.Controls.Add(_errorLabel);
 
         var pulsadorGroup = new GroupBox
         {
             Text = "Pulsador",
-            Location = new Point(20, 160),
+            Location = new Point(20, 200),
             Size = new Size(640, 90)
         };
 
@@ -68,7 +95,7 @@ public sealed class ServiceForm : Form
         var administracionGroup = new GroupBox
         {
             Text = "Administración",
-            Location = new Point(20, 260),
+            Location = new Point(20, 300),
             Size = new Size(640, 90)
         };
 
@@ -86,5 +113,45 @@ public sealed class ServiceForm : Form
         Controls.Add(balanzaGroup);
         Controls.Add(pulsadorGroup);
         Controls.Add(administracionGroup);
+
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _refreshTimer.Tick += (_, _) => RefreshScaleData();
+
+        Shown += OnServiceFormShown;
+        FormClosed += OnServiceFormClosed;
+    }
+
+    private void OnServiceFormShown(object? sender, EventArgs e)
+    {
+        _scaleReader.Start();
+        RefreshScaleData();
+        _refreshTimer.Start();
+    }
+
+    private void OnServiceFormClosed(object? sender, FormClosedEventArgs e)
+    {
+        _refreshTimer.Stop();
+        _scaleReader.Stop();
+    }
+
+    private void RefreshScaleData()
+    {
+        var snapshot = _scaleReader.GetSnapshot();
+
+        _pesoActualLabel.Text = snapshot.WeightKg.HasValue
+            ? $"Peso actual: {snapshot.WeightKg.Value:F3} kg"
+            : "Peso actual: -- kg";
+
+        _tramaLabel.Text = string.IsNullOrWhiteSpace(snapshot.RawFrame)
+            ? "Trama ASCII: --"
+            : $"Trama ASCII: {snapshot.RawFrame}";
+
+        _conexionLabel.Text = snapshot.IsConnected
+            ? "Conexión: Conectada"
+            : "Conexión: Desconectada";
+
+        _errorLabel.Text = string.IsNullOrWhiteSpace(snapshot.LastError)
+            ? "Error: --"
+            : $"Error: {snapshot.LastError}";
     }
 }

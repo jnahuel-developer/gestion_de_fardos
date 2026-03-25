@@ -17,15 +17,6 @@ Proyecto base para el sistema de gestion de fardos con arquitectura por capas y 
    scripts\dev.cmd
    ```
 
-El script `scripts/dev.ps1` detecta automaticamente la raiz del repositorio y ejecuta, en este orden:
-
-1. `dotnet --info`
-2. `dotnet restore GestionDeFardos.sln`
-3. `dotnet build GestionDeFardos.sln -c Debug`
-4. `dotnet run --project src/GestionDeFardos.App/GestionDeFardos.App.csproj -c Debug`
-
-Si no hay `dotnet` en el `PATH` o no esta instalado un SDK 8.x, el script finaliza con un mensaje de error claro.
-
 ### Alternativa manual
 
 1. Restaurar dependencias:
@@ -52,18 +43,30 @@ Si no hay `dotnet` en el `PATH` o no esta instalado un SDK 8.x, el script finali
   scripts\build-installer.cmd
   ```
 
-`build-installer` usa Inno Setup si `iscc` esta disponible. Si no, cae automaticamente a IExpress para generar un instalador `.exe` nativo de Windows.
-
 Artefactos esperados:
 
 - `artifacts/publish/win-x64`: binarios publicados para la entrega.
 - `artifacts/dist`: instalador `.exe` generado por Inno Setup.
 
-## Estructura del repositorio
+## Configuracion serial actual
 
-- `src/GestionDeFardos.App`: aplicacion WinForms.
-- `src/GestionDeFardos.Core`: contratos, modelos y utilitarios sin IO.
-- `src/GestionDeFardos.Infrastructure`: acceso a configuracion, puerto serial, logging y adaptadores tecnicos.
-- `docs/`: documentacion operativa, arquitectura, instalacion y checklist.
-- `samples/`: archivos de ejemplo de configuracion.
-- `installer/`: script `.iss` del instalador.
+- La balanza y el pulsador usan puertos serie independientes.
+- `Scale.Protocol` define como interpretar las tramas de la balanza, no la configuracion fisica del puerto.
+- Protocolos soportados por la app:
+  - `w180-t` (default)
+  - `simple-ascii`
+- La configuracion fisica de ambos puertos se define en `config.json`:
+  - `PortName`
+  - `BaudRate`
+  - `DataBits`
+  - `Parity`
+  - `StopBits`
+  - `Handshake`
+- `Scale.NewLine` solo aplica a protocolos por linea como `simple-ascii`.
+- El pulsador trabaja por tramas `$P1!` / `$B1!`.
+
+## Diagnostico en Service
+
+- Service ya no bloquea por configuraciones seriales no esperadas.
+- La pantalla muestra el ultimo chunk crudo recibido de la balanza y la ultima trama interpretada correctamente.
+- Si el protocolo configurado no es soportado, Service sigue abriendo y muestra solo recepcion cruda.

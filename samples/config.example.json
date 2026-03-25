@@ -1,14 +1,21 @@
 {
   "Scale": {
+    "Protocol": "w180-t",
     "PortName": "COM3",
+    "BaudRate": 9600,
+    "DataBits": 7,
+    "Parity": "Even",
+    "StopBits": "Two",
+    "Handshake": "None",
+    "NewLine": "\\n"
+  },
+  "Button": {
+    "PortName": "COM4",
     "BaudRate": 9600,
     "DataBits": 8,
     "Parity": "None",
     "StopBits": "One",
-    "NewLine": "\\n"
-  },
-  "Button": {
-    "InputLine": "Cts"
+    "Handshake": "None"
   },
   "Thresholds": {
     "MinKg": 20.0,

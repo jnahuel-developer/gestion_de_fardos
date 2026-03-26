@@ -240,7 +240,6 @@ public sealed class ServiceForm : Form
 
     private void OnServiceFormShown(object? sender, EventArgs e)
     {
-        _servicePortMonitor.Start();
         RefreshServiceData();
         _refreshTimer.Start();
     }
@@ -248,7 +247,6 @@ public sealed class ServiceForm : Form
     private void OnServiceFormClosed(object? sender, FormClosedEventArgs e)
     {
         _refreshTimer.Stop();
-        _servicePortMonitor.Stop();
     }
 
     private void RefreshServiceData()

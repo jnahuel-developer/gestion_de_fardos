@@ -7,13 +7,15 @@ using GestionDeFardos.Core.Utils;
 
 namespace GestionDeFardos.Infrastructure;
 
-public sealed class SerialServicePortMonitor : IServicePortMonitor
+public sealed class SerialServicePortMonitor : IWeighingRuntime
 {
     private static readonly byte[] ButtonRequestBytes = Encoding.ASCII.GetBytes("$P1!");
     private static readonly byte[] ButtonResponseBytes = Encoding.ASCII.GetBytes("$B1!");
 
     private readonly ScaleSettings _scaleSettings;
     private readonly ButtonSettings _buttonSettings;
+    private readonly ThresholdSettings _thresholdSettings;
+    private readonly IWeighingRepository? _weighingRepository;
     private readonly IAppLogger _logger;
     private readonly object _sync = new();
     private readonly List<byte> _scaleBuffer = [];
@@ -22,14 +24,27 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
     private readonly IScaleProtocol? _scaleProtocol;
 
     private ServicePortSnapshot _snapshot = new();
+    private WeighingRuntimeSnapshot _operationSnapshot = new();
     private SerialPort? _scalePort;
     private SerialPort? _buttonPort;
     private bool _started;
 
     public SerialServicePortMonitor(ScaleSettings scaleSettings, ButtonSettings buttonSettings, IAppLogger logger)
+        : this(scaleSettings, buttonSettings, new ThresholdSettings(), null, logger)
+    {
+    }
+
+    public SerialServicePortMonitor(
+        ScaleSettings scaleSettings,
+        ButtonSettings buttonSettings,
+        ThresholdSettings thresholdSettings,
+        IWeighingRepository? weighingRepository,
+        IAppLogger logger)
     {
         _scaleSettings = scaleSettings;
         _buttonSettings = buttonSettings;
+        _thresholdSettings = thresholdSettings;
+        _weighingRepository = weighingRepository;
         _logger = logger;
         _configuredScaleProtocol = string.IsNullOrWhiteSpace(scaleSettings.Protocol)
             ? string.Empty
@@ -54,11 +69,13 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
             _scaleBuffer.Clear();
             _buttonBuffer.Clear();
             _snapshot = CreateInitialSnapshot();
+            _operationSnapshot = CreateInitialOperationSnapshot();
+            LoadLastSavedRecord();
 
             _logger.Log(
                 AppLogLevel.Info,
                 "SERVICE",
-                $"Iniciando Service. ProtocoloBalanza={DisplayScaleProtocol()}, PerfilBalanza={_snapshot.ScalePortProfile}, PerfilPulsador={_snapshot.ButtonPortProfile}.");
+                $"Iniciando runtime compartido. ProtocoloBalanza={DisplayScaleProtocol()}, PerfilBalanza={_snapshot.ScalePortProfile}, PerfilPulsador={_snapshot.ButtonPortProfile}.");
 
             OpenScalePort();
             OpenButtonPort();
@@ -86,6 +103,9 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
                 ? ServiceButtonState.Disconnected
                 : ServiceButtonState.Disabled;
             _snapshot.UpdatedAt = DateTime.Now;
+
+            _operationSnapshot.ScaleIsConnected = false;
+            _operationSnapshot.UpdatedAt = DateTime.Now;
         }
     }
 
@@ -114,6 +134,24 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
                 LastButtonResponse = _snapshot.LastButtonResponse,
                 LastButtonPressedAt = _snapshot.LastButtonPressedAt,
                 ButtonLastError = _snapshot.ButtonLastError
+            };
+        }
+    }
+
+    public WeighingRuntimeSnapshot GetOperationSnapshot()
+    {
+        lock (_sync)
+        {
+            return new WeighingRuntimeSnapshot
+            {
+                ScaleIsConnected = _operationSnapshot.ScaleIsConnected,
+                CurrentWeightGrams = _operationSnapshot.CurrentWeightGrams,
+                CurrentWeightKg = _operationSnapshot.CurrentWeightKg,
+                UpdatedAt = _operationSnapshot.UpdatedAt,
+                LastCaptureStatus = _operationSnapshot.LastCaptureStatus,
+                LastCaptureMessage = _operationSnapshot.LastCaptureMessage,
+                LastCaptureAt = _operationSnapshot.LastCaptureAt,
+                LastSavedRecord = CloneRecordSummary(_operationSnapshot.LastSavedRecord)
             };
         }
     }
@@ -147,6 +185,53 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         };
     }
 
+    private WeighingRuntimeSnapshot CreateInitialOperationSnapshot()
+    {
+        return new WeighingRuntimeSnapshot
+        {
+            ScaleIsConnected = false,
+            CurrentWeightGrams = null,
+            CurrentWeightKg = null,
+            UpdatedAt = DateTime.Now,
+            LastCaptureStatus = WeighingCaptureStatus.Idle,
+            LastCaptureMessage = _weighingRepository is null
+                ? "La base local no esta disponible. Las capturas se rechazaran hasta revisar la persistencia."
+                : "Esperando opresion del pulsador.",
+            LastCaptureAt = null,
+            LastSavedRecord = null
+        };
+    }
+
+    private void LoadLastSavedRecord()
+    {
+        if (_weighingRepository is null)
+        {
+            return;
+        }
+
+        try
+        {
+            WeighingRecord? latestRecord = _weighingRepository.GetLatestAsync().GetAwaiter().GetResult();
+            if (latestRecord is null)
+            {
+                return;
+            }
+
+            _operationSnapshot.LastSavedRecord = new WeighingRecordSummary
+            {
+                Id = latestRecord.Id,
+                Timestamp = latestRecord.Timestamp,
+                WeightKg = latestRecord.WeightKg
+            };
+
+            _logger.Log(AppLogLevel.Info, "CAPTURE", $"Ultima pesada cargada desde base local. Id={latestRecord.Id}, Kg={latestRecord.WeightKg:F2}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", $"No se pudo leer la ultima pesada guardada: {ex.Message}");
+        }
+    }
+
     private void OpenScalePort()
     {
         if (string.IsNullOrWhiteSpace(_scaleSettings.PortName))
@@ -164,6 +249,8 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
             _scalePort = serialPort;
             _snapshot.IsConnected = true;
             _snapshot.UpdatedAt = DateTime.Now;
+            _operationSnapshot.ScaleIsConnected = true;
+            _operationSnapshot.UpdatedAt = DateTime.Now;
 
             if (_scaleProtocol is not null)
             {
@@ -336,6 +423,8 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
                 _snapshot.ScaleRawChunk = rawChunk;
                 _snapshot.UpdatedAt = DateTime.Now;
                 _snapshot.IsConnected = true;
+                _operationSnapshot.ScaleIsConnected = true;
+                _operationSnapshot.UpdatedAt = DateTime.Now;
 
                 _logger.Log(
                     AppLogLevel.Info,
@@ -461,13 +550,17 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
 
     private void HandleButtonRequestReceived()
     {
+        DateTime pressedAt = DateTime.Now;
+
         _snapshot.ButtonStatus = ServiceButtonState.Listening;
         _snapshot.LastButtonFrame = "$P1!";
-        _snapshot.LastButtonPressedAt = DateTime.Now;
+        _snapshot.LastButtonPressedAt = pressedAt;
         _snapshot.ButtonLastError = null;
-        _snapshot.UpdatedAt = DateTime.Now;
+        _snapshot.UpdatedAt = pressedAt;
 
         _logger.Log(AppLogLevel.Info, "BUTTON", "BUTTON RX $P1!.");
+
+        ProcessCaptureForButtonPress(pressedAt);
 
         try
         {
@@ -490,6 +583,94 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         }
     }
 
+    private void ProcessCaptureForButtonPress(DateTime pressedAt)
+    {
+        _operationSnapshot.LastCaptureAt = pressedAt;
+        _operationSnapshot.UpdatedAt = pressedAt;
+
+        if (!_snapshot.RawGrams.HasValue || !_snapshot.WeightKg.HasValue)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.RejectedNoWeight,
+                "Pesada rechazada. No hay un peso valido disponible para guardar.");
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
+        }
+
+        decimal currentWeightKg = _snapshot.WeightKg.Value;
+        decimal minKg = Math.Min(_thresholdSettings.MinKg, _thresholdSettings.MaxKg);
+        decimal maxKg = Math.Max(_thresholdSettings.MinKg, _thresholdSettings.MaxKg);
+
+        if (currentWeightKg < minKg || currentWeightKg > maxKg)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.RejectedOutOfRange,
+                $"Pesada rechazada. El peso {currentWeightKg:F2} kg esta fuera del rango permitido ({minKg:F2} a {maxKg:F2} kg).");
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
+        }
+
+        if (_weighingRepository is null)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.SaveError,
+                "Pesada rechazada. La base local no esta disponible.");
+            _logger.Log(AppLogLevel.Error, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
+        }
+
+        try
+        {
+            var record = new WeighingRecord
+            {
+                Timestamp = pressedAt,
+                WeightKg = currentWeightKg,
+                RawGrams = _snapshot.RawGrams,
+                RawFrame = SelectFrameForPersistence(),
+                IsEditedToZero = false,
+                EditedAt = null
+            };
+
+            long recordId = _weighingRepository.SaveAsync(record).GetAwaiter().GetResult();
+
+            _operationSnapshot.LastCaptureStatus = WeighingCaptureStatus.Saved;
+            _operationSnapshot.LastCaptureMessage = $"Pesada guardada. Nro={recordId}, Kg={currentWeightKg:F2}.";
+            _operationSnapshot.LastSavedRecord = new WeighingRecordSummary
+            {
+                Id = recordId,
+                Timestamp = pressedAt,
+                WeightKg = currentWeightKg
+            };
+            _operationSnapshot.UpdatedAt = DateTime.Now;
+
+            _logger.Log(AppLogLevel.Info, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+        }
+        catch (Exception ex)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.SaveError,
+                $"Pesada rechazada. No se pudo guardar en base local: {ex.Message}");
+            _logger.Log(AppLogLevel.Error, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+        }
+    }
+
+    private void ApplyCaptureResult(WeighingCaptureStatus status, string message)
+    {
+        _operationSnapshot.LastCaptureStatus = status;
+        _operationSnapshot.LastCaptureMessage = message;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
+    }
+
+    private string SelectFrameForPersistence()
+    {
+        if (!string.IsNullOrWhiteSpace(_snapshot.ScaleLastDecodedFrame))
+        {
+            return _snapshot.ScaleLastDecodedFrame;
+        }
+
+        return _snapshot.ScaleRawChunk;
+    }
+
     private void ApplyScaleFrame(ScaleDecodedFrame frame)
     {
         decimal? kilograms = frame.WeightGrams.HasValue
@@ -503,6 +684,11 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         _snapshot.IsConnected = true;
         _snapshot.LastError = null;
         _snapshot.UpdatedAt = DateTime.Now;
+
+        _operationSnapshot.ScaleIsConnected = true;
+        _operationSnapshot.CurrentWeightGrams = frame.WeightGrams;
+        _operationSnapshot.CurrentWeightKg = kilograms;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
 
         string tareSegment = frame.TareGrams.HasValue ? $", TaraGramos={frame.TareGrams.Value}" : string.Empty;
         string weightSegment = frame.WeightGrams.HasValue && kilograms.HasValue
@@ -529,6 +715,9 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         _snapshot.LastError = errorMessage;
         _snapshot.UpdatedAt = DateTime.Now;
         _scaleBuffer.Clear();
+
+        _operationSnapshot.ScaleIsConnected = false;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
 
         _logger.Log(AppLogLevel.Error, "SCALE", errorMessage);
     }
@@ -562,6 +751,21 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         }
 
         return $"Scale.Protocol '{_configuredScaleProtocol}' no es soportado. Se mostrara solo recepcion cruda. Protocolos soportados: {ScaleProtocolCatalog.DescribeSupportedValues()}.";
+    }
+
+    private static WeighingRecordSummary? CloneRecordSummary(WeighingRecordSummary? source)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        return new WeighingRecordSummary
+        {
+            Id = source.Id,
+            Timestamp = source.Timestamp,
+            WeightKg = source.WeightKg
+        };
     }
 
     private static void AppendBytes(List<byte> buffer, byte[] chunk, int count)

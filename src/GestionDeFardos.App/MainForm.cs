@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using GestionDeFardos.Core.Config;
 using GestionDeFardos.Core.Interfaces;
+using GestionDeFardos.Core.Models;
 using GestionDeFardos.Infrastructure;
 using GestionDeFardos.Infrastructure.Config;
 
@@ -22,6 +23,15 @@ public sealed class MainForm : Form
     private readonly string _configPath;
     private readonly bool _configFileExists;
     private readonly bool _configLoadedSuccessfully;
+    private readonly IWeighingRepository? _weighingRepository;
+    private readonly IWeighingRuntime _weighingRuntime;
+    private readonly Label _scaleConnectionLabel;
+    private readonly Label _currentWeightLabel;
+    private readonly Label _captureStatusLabel;
+    private readonly Label _captureMessageLabel;
+    private readonly Label _lastCaptureAtLabel;
+    private readonly Label _lastRecordLabel;
+    private readonly System.Windows.Forms.Timer _refreshTimer;
     private ServiceForm? _serviceForm;
 
     public MainForm(IAppLogger logger)
@@ -30,31 +40,91 @@ public sealed class MainForm : Form
         _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
         _configFileExists = File.Exists(_configPath);
         (_settings, _configLoadedSuccessfully) = LoadAppSettings();
-        EnsureDatabaseReady();
+        _weighingRepository = EnsureDatabaseReady();
+        _weighingRuntime = new SerialServicePortMonitor(_settings.Scale, _settings.Button, _settings.Thresholds, _weighingRepository, _logger);
 
         Text = "Gestion de Fardos";
         StartPosition = FormStartPosition.CenterScreen;
-        Width = 800;
-        Height = 450;
+        Width = 860;
+        Height = 480;
 
         var titleLabel = new Label
         {
-            Text = "Sistema de Gestion de Fardos",
+            Text = "Gestion de Fardos",
             AutoSize = true,
-            Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-            Location = new Point(20, 20)
+            Font = new Font("Segoe UI", 16F, FontStyle.Bold),
+            Location = new Point(24, 22)
         };
 
-        var skeletonLabel = new Label
+        var operationGroup = new GroupBox
         {
-            Text = "Pantalla principal fuera de alcance en Etapa 1",
+            Text = "Operacion",
+            Location = new Point(24, 64),
+            Size = new Size(792, 332)
+        };
+
+        _currentWeightLabel = new Label
+        {
+            Text = "Peso actual: -- kg",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 24F, FontStyle.Bold),
+            Location = new Point(24, 40)
+        };
+
+        _scaleConnectionLabel = new Label
+        {
+            Text = "Estado de balanza: --",
             AutoSize = true,
             Font = new Font("Segoe UI", 10F, FontStyle.Regular),
-            Location = new Point(20, 70)
+            Location = new Point(28, 96)
         };
 
+        _captureStatusLabel = new Label
+        {
+            Text = "Ultima opresion: Esperando",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            Location = new Point(28, 140)
+        };
+
+        _captureMessageLabel = new Label
+        {
+            Text = "Resultado: --",
+            AutoSize = false,
+            Size = new Size(736, 44),
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+            Location = new Point(28, 170)
+        };
+
+        _lastCaptureAtLabel = new Label
+        {
+            Text = "Momento de la ultima opresion: --",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+            Location = new Point(28, 226)
+        };
+
+        _lastRecordLabel = new Label
+        {
+            Text = "Ultimo registro guardado: --",
+            AutoSize = false,
+            Size = new Size(736, 52),
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+            Location = new Point(28, 258)
+        };
+
+        operationGroup.Controls.Add(_currentWeightLabel);
+        operationGroup.Controls.Add(_scaleConnectionLabel);
+        operationGroup.Controls.Add(_captureStatusLabel);
+        operationGroup.Controls.Add(_captureMessageLabel);
+        operationGroup.Controls.Add(_lastCaptureAtLabel);
+        operationGroup.Controls.Add(_lastRecordLabel);
+
         Controls.Add(titleLabel);
-        Controls.Add(skeletonLabel);
+        Controls.Add(operationGroup);
+
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = 200 };
+        _refreshTimer.Tick += (_, _) => RefreshOperationData();
 
         Load += OnMainFormLoad;
         FormClosed += OnMainFormClosed;
@@ -67,7 +137,16 @@ public sealed class MainForm : Form
         try
         {
             AppSettings settings = configLoader.Load(AppContext.BaseDirectory);
-            _logger.Log(AppLogLevel.Info, "CONFIG", $"Configuracion cargada desde {_configPath}.");
+
+            if (_configFileExists)
+            {
+                _logger.Log(AppLogLevel.Info, "CONFIG", $"Configuracion cargada desde {_configPath}.");
+            }
+            else
+            {
+                _logger.Log(AppLogLevel.Warning, "CONFIG", $"No se encontro config.json en {_configPath}. La app usara valores por defecto.");
+            }
+
             return (settings, true);
         }
         catch (Exception ex)
@@ -85,12 +164,12 @@ public sealed class MainForm : Form
         }
     }
 
-    private void EnsureDatabaseReady()
+    private IWeighingRepository? EnsureDatabaseReady()
     {
         if (!_configFileExists || !_configLoadedSuccessfully)
         {
             _logger.Log(AppLogLevel.Warning, "DB", "La base local no se inicializa porque config.json no esta disponible o no se pudo cargar correctamente.");
-            return;
+            return null;
         }
 
         try
@@ -98,6 +177,7 @@ public sealed class MainForm : Form
             var repository = new SqliteWeighingRepository(AppContext.BaseDirectory, _settings.Database, _logger);
             repository.InitializeAsync().GetAwaiter().GetResult();
             _logger.Log(AppLogLevel.Info, "DB", $"Repositorio local preparado en {repository.GetDatabasePath()}.");
+            return repository;
         }
         catch (Exception ex)
         {
@@ -110,18 +190,47 @@ public sealed class MainForm : Form
                 "Advertencia de base local",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+
+            return null;
         }
     }
 
     private void OnMainFormLoad(object? sender, EventArgs e)
     {
         RegisterServiceHotkeys();
+        _weighingRuntime.Start();
+        RefreshOperationData();
+        _refreshTimer.Start();
     }
 
     private void OnMainFormClosed(object? sender, FormClosedEventArgs e)
     {
+        _refreshTimer.Stop();
+        _weighingRuntime.Stop();
         UnregisterHotKey(Handle, HotkeyIdCtrlShiftS);
         UnregisterHotKey(Handle, HotkeyIdCtrlAltShiftS);
+    }
+
+    private void RefreshOperationData()
+    {
+        WeighingRuntimeSnapshot snapshot = _weighingRuntime.GetOperationSnapshot();
+
+        _currentWeightLabel.Text = snapshot.CurrentWeightKg.HasValue
+            ? $"Peso actual: {snapshot.CurrentWeightKg.Value:F2} kg"
+            : "Peso actual: -- kg";
+
+        _scaleConnectionLabel.Text = snapshot.ScaleIsConnected
+            ? "Estado de balanza: Conectada"
+            : "Estado de balanza: Desconectada";
+
+        _captureStatusLabel.Text = $"Ultima opresion: {FormatCaptureStatus(snapshot.LastCaptureStatus)}";
+        _captureMessageLabel.Text = $"Resultado: {FormatValue(snapshot.LastCaptureMessage)}";
+        _lastCaptureAtLabel.Text = snapshot.LastCaptureAt.HasValue
+            ? $"Momento de la ultima opresion: {snapshot.LastCaptureAt.Value:dd/MM/yyyy HH:mm:ss.fff}"
+            : "Momento de la ultima opresion: --";
+        _lastRecordLabel.Text = snapshot.LastSavedRecord is null
+            ? "Ultimo registro guardado: --"
+            : $"Ultimo registro guardado: Nro {snapshot.LastSavedRecord.Id} - {snapshot.LastSavedRecord.Timestamp:dd/MM/yyyy HH:mm:ss} - {snapshot.LastSavedRecord.WeightKg:F2} kg";
     }
 
     private void RegisterServiceHotkeys()
@@ -211,8 +320,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var servicePortMonitor = new SerialServicePortMonitor(_settings.Scale, _settings.Button, _logger);
-        _serviceForm = new ServiceForm(servicePortMonitor);
+        _serviceForm = new ServiceForm(_weighingRuntime);
         _serviceForm.FormClosed += (_, _) =>
         {
             _logger.Log(AppLogLevel.Info, "SERVICE", "Modo Service cerrado.");
@@ -253,6 +361,24 @@ public sealed class MainForm : Form
         }
 
         return true;
+    }
+
+    private static string FormatCaptureStatus(WeighingCaptureStatus status)
+    {
+        return status switch
+        {
+            WeighingCaptureStatus.Idle => "Esperando pulsador",
+            WeighingCaptureStatus.Saved => "Pesada guardada",
+            WeighingCaptureStatus.RejectedNoWeight => "Rechazada sin peso valido",
+            WeighingCaptureStatus.RejectedOutOfRange => "Rechazada fuera de rango",
+            WeighingCaptureStatus.SaveError => "Error de guardado",
+            _ => "--"
+        };
+    }
+
+    private static string FormatValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "--" : value;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

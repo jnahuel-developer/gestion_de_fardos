@@ -10,6 +10,11 @@ public interface IServicePortMonitor
     ServicePortSnapshot GetSnapshot();
 }
 
+public interface IWeighingRuntime : IServicePortMonitor
+{
+    WeighingRuntimeSnapshot GetOperationSnapshot();
+}
+
 public interface IAppLogger
 {
     void Log(AppLogLevel level, string category, string message);

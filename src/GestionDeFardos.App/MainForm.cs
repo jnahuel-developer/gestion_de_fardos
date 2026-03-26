@@ -166,7 +166,7 @@ public sealed class MainForm : Form
         var actionsTitleLabel = BuildSectionTitle("Acciones", new Point(22, 20));
         var actionsDescriptionLabel = new Label
         {
-            Text = "Los accesos ya quedan visibles en la pantalla principal para completar los flujos en las siguientes mods.",
+            Text = "La edicion de registros ya queda disponible desde esta pantalla. La exportacion se completa en la siguiente mod.",
             AutoSize = false,
             Size = new Size(408, 48),
             Font = new Font("Segoe UI", 9F, FontStyle.Regular),
@@ -186,9 +186,7 @@ public sealed class MainForm : Form
             UseVisualStyleBackColor = false
         };
         _editRecordButton.FlatAppearance.BorderSize = 0;
-        _editRecordButton.Click += (_, _) => ShowFeaturePendingMessage(
-            "Editar registro",
-            "La edicion de registros se implementara en mod0008.");
+        _editRecordButton.Click += (_, _) => HandleEditRecordRequested();
 
         _exportButton = new Button
         {
@@ -348,6 +346,110 @@ public sealed class MainForm : Form
             featureName,
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
+    }
+
+    private void HandleEditRecordRequested()
+    {
+        if (_weighingRepository is null)
+        {
+            _logger.Log(AppLogLevel.Warning, "EDIT", "No se puede editar una pesada porque la base local no esta disponible.");
+
+            MessageBox.Show(
+                "La base local no esta disponible.\n" +
+                "Revise la configuracion y el acceso al archivo de base antes de editar registros.",
+                "Edicion no disponible",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.Passwords.Edit))
+        {
+            _logger.Log(AppLogLevel.Warning, "EDIT", "Passwords.Edit esta vacio en config.json.");
+
+            MessageBox.Show(
+                "El campo Passwords.Edit esta vacio en config.json.\n" +
+                "Configure una contrasena de edicion para habilitar este flujo.",
+                "Edicion bloqueada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        long selectedRecordId = 0;
+
+        try
+        {
+            WeighingRecord? latestRecord = _weighingRepository.GetLatestAsync().GetAwaiter().GetResult();
+            if (latestRecord is null)
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", "No hay pesadas guardadas para editar.");
+
+                MessageBox.Show(
+                    "Aun no hay pesadas guardadas en la base local.",
+                    "Sin registros para editar",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var prompt = new EditRecordPromptForm(latestRecord.Id);
+            DialogResult dialogResult = prompt.ShowDialog(this);
+            if (dialogResult != DialogResult.OK)
+            {
+                return;
+            }
+
+            selectedRecordId = prompt.SelectedRecordId;
+
+            if (!string.Equals(prompt.EnteredPassword, _settings.Passwords.Edit, StringComparison.Ordinal))
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", $"Intento de edicion rechazado para la pesada {selectedRecordId} por contrasena incorrecta.");
+
+                MessageBox.Show(
+                    "La contrasena de edicion es incorrecta.",
+                    "Edicion denegada",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            bool wasUpdated = _weighingRepository.SetWeightToZeroAsync(selectedRecordId, DateTime.Now).GetAwaiter().GetResult();
+            if (!wasUpdated)
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", $"La pesada {selectedRecordId} no pudo editarse porque no hubo filas afectadas.");
+
+                MessageBox.Show(
+                    $"No se pudo editar la pesada {selectedRecordId}.",
+                    "Edicion no aplicada",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            _weighingRuntime.RefreshLastSavedRecord();
+            RefreshOperationData();
+
+            _logger.Log(AppLogLevel.Info, "EDIT", $"La pesada {selectedRecordId} fue puesta en cero correctamente.");
+
+            MessageBox.Show(
+                $"La pesada {selectedRecordId} fue puesta en cero correctamente.",
+                "Edicion aplicada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            string recordSegment = selectedRecordId > 0 ? $" la pesada {selectedRecordId}" : " el registro solicitado";
+            _logger.Log(AppLogLevel.Error, "EDIT", $"No se pudo editar{recordSegment}: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo editar el registro solicitado.\n" +
+                $"Detalle: {ex.Message}",
+                "Error de edicion",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private void RegisterServiceHotkeys()

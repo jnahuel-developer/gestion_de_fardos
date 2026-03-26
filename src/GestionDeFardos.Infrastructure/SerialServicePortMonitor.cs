@@ -156,6 +156,14 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
         }
     }
 
+    public void RefreshLastSavedRecord()
+    {
+        lock (_sync)
+        {
+            LoadLastSavedRecord();
+        }
+    }
+
     private ServicePortSnapshot CreateInitialSnapshot()
     {
         bool buttonConfigured = !string.IsNullOrWhiteSpace(_buttonSettings.PortName);
@@ -204,6 +212,8 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
 
     private void LoadLastSavedRecord()
     {
+        _operationSnapshot.LastSavedRecord = null;
+
         if (_weighingRepository is null)
         {
             return;
@@ -214,6 +224,7 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
             WeighingRecord? latestRecord = _weighingRepository.GetLatestAsync().GetAwaiter().GetResult();
             if (latestRecord is null)
             {
+                _logger.Log(AppLogLevel.Info, "CAPTURE", "No hay pesadas guardadas en la base local.");
                 return;
             }
 

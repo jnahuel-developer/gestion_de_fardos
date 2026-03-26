@@ -32,6 +32,7 @@ public sealed class MainForm : Form
     private readonly bool _configLoadedSuccessfully;
     private readonly IWeighingRepository? _weighingRepository;
     private readonly IWeighingRuntime _weighingRuntime;
+    private readonly IReportExporter _reportExporter;
     private readonly Label _scaleConnectionLabel;
     private readonly Label _weightUpdatedAtLabel;
     private readonly Label _currentWeightValueLabel;
@@ -52,6 +53,7 @@ public sealed class MainForm : Form
         (_settings, _configLoadedSuccessfully) = LoadAppSettings();
         _weighingRepository = EnsureDatabaseReady();
         _weighingRuntime = new SerialServicePortMonitor(_settings.Scale, _settings.Button, _settings.Thresholds, _weighingRepository, _logger);
+        _reportExporter = new ClosedXmlReportExporter(_logger);
 
         Text = "Gestion de Fardos";
         StartPosition = FormStartPosition.CenterScreen;
@@ -166,7 +168,7 @@ public sealed class MainForm : Form
         var actionsTitleLabel = BuildSectionTitle("Acciones", new Point(22, 20));
         var actionsDescriptionLabel = new Label
         {
-            Text = "La edicion de registros ya queda disponible desde esta pantalla. La exportacion se completa en la siguiente mod.",
+            Text = "La edicion y la exportacion ya quedan disponibles desde esta pantalla principal.",
             AutoSize = false,
             Size = new Size(408, 48),
             Font = new Font("Segoe UI", 9F, FontStyle.Regular),
@@ -201,9 +203,7 @@ public sealed class MainForm : Form
         };
         _exportButton.FlatAppearance.BorderColor = Color.FromArgb(209, 216, 223);
         _exportButton.FlatAppearance.BorderSize = 1;
-        _exportButton.Click += (_, _) => ShowFeaturePendingMessage(
-            "Exportar a Excel",
-            "La exportacion a Excel se implementara en mod0009.");
+        _exportButton.Click += (_, _) => HandleExportRequested();
 
         actionsPanel.Controls.Add(actionsTitleLabel);
         actionsPanel.Controls.Add(actionsDescriptionLabel);
@@ -452,6 +452,88 @@ public sealed class MainForm : Form
         }
     }
 
+    private void HandleExportRequested()
+    {
+        if (_weighingRepository is null)
+        {
+            _logger.Log(AppLogLevel.Warning, "EXPORT", "No se puede exportar porque la base local no esta disponible.");
+
+            MessageBox.Show(
+                "La base local no esta disponible.\n" +
+                "Revise la configuracion y el acceso al archivo de base antes de exportar registros.",
+                "Exportacion no disponible",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        string exportDirectory = ResolveExportDirectory();
+
+        using var prompt = new ExportDateRangePromptForm(exportDirectory);
+        DialogResult dialogResult = prompt.ShowDialog(this);
+        if (dialogResult != DialogResult.OK)
+        {
+            return;
+        }
+
+        if (prompt.ToDate < prompt.FromDate)
+        {
+            _logger.Log(AppLogLevel.Warning, "EXPORT", $"Rango invalido solicitado. Desde={prompt.FromDate:dd/MM/yyyy}, Hasta={prompt.ToDate:dd/MM/yyyy}.");
+
+            MessageBox.Show(
+                "La fecha final no puede ser menor a la fecha inicial.",
+                "Rango invalido",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            DateTime fromInclusive = prompt.FromDate.Date;
+            DateTime toInclusive = prompt.ToDate.Date.AddDays(1).AddTicks(-1);
+
+            IReadOnlyList<WeighingRecord> records = _weighingRepository
+                .ListByDateRangeAsync(fromInclusive, toInclusive)
+                .GetAwaiter()
+                .GetResult();
+
+            if (records.Count == 0)
+            {
+                _logger.Log(AppLogLevel.Info, "EXPORT", $"No hay registros para exportar en el rango {prompt.FromDate:dd/MM/yyyy} - {prompt.ToDate:dd/MM/yyyy}.");
+
+                MessageBox.Show(
+                    "No hay pesadas guardadas dentro del rango seleccionado.",
+                    "Sin datos para exportar",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            string outputPath = BuildExportFilePath(exportDirectory, prompt.FromDate, prompt.ToDate);
+            _reportExporter.ExportAsync(records, outputPath).GetAwaiter().GetResult();
+
+            _logger.Log(AppLogLevel.Info, "EXPORT", $"Exportacion finalizada. Archivo={outputPath}, Registros={records.Count}.");
+
+            MessageBox.Show(
+                $"Se exportaron {records.Count} registros correctamente.\n\nArchivo generado:\n{outputPath}",
+                "Exportacion completada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(AppLogLevel.Error, "EXPORT", $"No se pudo exportar a Excel: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo generar el archivo Excel solicitado.\n" +
+                $"Detalle: {ex.Message}",
+                "Error de exportacion",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     private void RegisterServiceHotkeys()
     {
         RegisterHotkeyWithWarning(
@@ -633,6 +715,24 @@ public sealed class MainForm : Form
     private static string FormatValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? "--" : value;
+    }
+
+    private string ResolveExportDirectory()
+    {
+        string configuredFolder = string.IsNullOrWhiteSpace(_settings.Export.Folder)
+            ? "exports"
+            : _settings.Export.Folder.Trim();
+
+        return Path.IsPathRooted(configuredFolder)
+            ? Path.GetFullPath(configuredFolder)
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, configuredFolder));
+    }
+
+    private static string BuildExportFilePath(string exportDirectory, DateTime fromDate, DateTime toDate)
+    {
+        string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string fileName = $"pesadas_{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}_{timestamp}.xlsx";
+        return Path.Combine(exportDirectory, fileName);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

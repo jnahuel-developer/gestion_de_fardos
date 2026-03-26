@@ -1,72 +1,128 @@
 # gestion_de_fardos
 
-Proyecto base para el sistema de gestion de fardos con arquitectura por capas y solucion .NET 8.
+Aplicacion WinForms para captura de pesadas con balanza y pulsador seriales, persistencia local SQLite, edicion de registros, exportacion a Excel y diagnostico tecnico desde Modo Service.
 
-## Requisitos
+## Estado actual
 
-- .NET 8 SDK con soporte WindowsDesktop operativo.
-- Inno Setup 6.x para compilar el instalador `.exe` de entrega.
+- Etapa 1 finalizada y validada en cliente.
+- Etapa 2 finalizada.
+- Version objetivo de entrega: `1.1.0`.
+
+## Funcionalidad principal
+
+- Lectura continua de balanza por puerto serie con protocolo configurable:
+  - `w180-t`
+  - `simple-ascii`
+- Lectura del pulsador por puerto serie independiente.
+- Registro automatico de pesadas al recibir `$P1!`.
+- Respuesta `$B1!` al pulsador.
+- Validacion por thresholds antes de guardar.
+- Base local SQLite.
+- Edicion de una pesada por numero, dejandola en `0`.
+- Exportacion de registros a `.xlsx`.
+- Borrado historico por fecha desde Modo Service.
+- Logging diario y diagnostico raw de balanza y pulsador.
+
+## Estructura de la solucion
+
+- `src/GestionDeFardos.App`: interfaz WinForms.
+- `src/GestionDeFardos.Core`: configuracion, contratos y modelos.
+- `src/GestionDeFardos.Infrastructure`: serial, logging, SQLite y exportacion Excel.
+- `docs`: documentacion tecnica y operativa.
+- `samples/config.example.json`: configuracion de referencia.
+- `installer`: script Inno Setup.
+- `scripts`: helpers de compilacion, publicacion e instalador.
+
+## Configuracion
+
+La app lee `config.json` desde la carpeta del ejecutable al iniciar.
+
+Secciones relevantes:
+
+- `Scale`: puerto y protocolo de balanza.
+- `Button`: puerto del pulsador.
+- `Database`: ruta del archivo SQLite.
+- `Thresholds`: rango valido de kg para guardar.
+- `Passwords`: claves de edicion y Service.
+- `Export`: carpeta de salida para los `.xlsx`.
+
+Si se cambia `config.json`, hay que cerrar y volver a abrir la app.
 
 ## Compilacion y ejecucion
 
-### Opcion recomendada (Windows)
+### Desarrollo
 
-1. Abrir una terminal en cualquier carpeta.
-2. Ejecutar el wrapper:
-   ```cmd
-   scripts\dev.cmd
-   ```
+```cmd
+scripts\dev.cmd
+```
 
-### Alternativa manual
+### Manual
 
-1. Restaurar dependencias:
-   ```bash
-   dotnet restore GestionDeFardos.sln
-   ```
-2. Compilar la solucion en Debug:
-   ```bash
-   dotnet build GestionDeFardos.sln -c Debug
-   ```
-3. Ejecutar la aplicacion WinForms en Debug:
-   ```bash
-   dotnet run --project src/GestionDeFardos.App/GestionDeFardos.App.csproj -c Debug
-   ```
+```bash
+dotnet restore GestionDeFardos.sln
+dotnet build GestionDeFardos.sln -c Debug
+dotnet run --project src/GestionDeFardos.App/GestionDeFardos.App.csproj -c Debug
+```
 
-## Publicacion e instalador
+## Publicacion
 
-- Publicacion self-contained x64:
-  ```powershell
-  scripts\release.cmd
-  ```
-- Compilacion del instalador `.exe`:
-  ```powershell
-  scripts\build-installer.cmd
-  ```
+Publicacion self-contained x64 con defaults de la version `1.1.0`:
 
-Artefactos esperados:
+```powershell
+scripts\release.cmd
+```
 
-- `artifacts/publish/win-x64`: binarios publicados para la entrega.
-- `artifacts/dist`: instalador `.exe` generado por Inno Setup.
+Salida esperada:
 
-## Configuracion serial actual
+- `artifacts/publish/win-x64`
 
-- La balanza y el pulsador usan puertos serie independientes.
-- `Scale.Protocol` define como interpretar las tramas de la balanza, no la configuracion fisica del puerto.
-- Protocolos soportados por la app:
-  - `w180-t` (default)
-  - `simple-ascii`
-- La configuracion fisica de ambos puertos se define en `config.json`:
-  - `PortName`
-  - `BaudRate`
-  - `DataBits`
-  - `Parity`
-  - `StopBits`
-  - `Handshake`
-- `Scale.NewLine` solo aplica a protocolos por linea como `simple-ascii`.
-- El pulsador trabaja por tramas `$P1!` / `$B1!`.
+La publicacion copia:
 
-## Diagnostico en Service
+- binarios de la app
+- `config.example.json`
+- `config.template.json`
+- documentacion `.md` desde `docs`
 
-- Service ya no bloquea por configuraciones seriales no esperadas.
-- La pantalla muestra el ultimo chunk crudo recibido de la balanza y la ultima trama interpretada correctamente.
-- Si el protocolo configurado no es soportado, Service sigue abriendo y muestra solo recepcion cruda.
+## Instalador
+
+Compilacion del instalador:
+
+```powershell
+scripts\build-installer.cmd
+```
+
+Salida esperada:
+
+- `artifacts/dist/GestionDeFardos-Setup-1.1.0-x64.exe`
+- `artifacts/dist/instalacion_cliente.md`
+
+Si `iscc` no esta disponible en el PATH, el script usa el bootstrapper integrado.
+
+## Flujo operativo resumido
+
+1. La pantalla principal muestra el peso actual, la ultima opresion y el ultimo registro guardado.
+2. Cada `$P1!` dispara un intento de guardado usando el ultimo peso valido disponible.
+3. El usuario puede editar un registro desde la pantalla principal.
+4. El usuario puede exportar registros por rango de fechas desde la pantalla principal.
+5. `Ctrl+Shift+S` o `Ctrl+Alt+Shift+S` abren Modo Service.
+6. Service muestra diagnostico raw e interpretado y permite borrar historico por fecha.
+
+## Logs
+
+- Carpeta: `./logs`
+- Nombre diario: `gestion-de-fardos-YYYYMMDD.log`
+- Incluye:
+  - apertura y cierre de puertos
+  - recepcion raw
+  - interpretacion de balanza
+  - `BUTTON RX $P1!`
+  - `BUTTON TX $B1!`
+  - capturas, ediciones, exportaciones y borrados
+
+## Documentacion relacionada
+
+- `docs/manual_operativo.md`
+- `docs/instalacion_cliente.md`
+- `docs/checklist_pruebas.md`
+- `docs/arquitectura.md`
+- `docs/Roadmap.md`

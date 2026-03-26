@@ -12,12 +12,13 @@ internal static class Program
 
         IAppLogger logger = new FileAppLogger(AppContext.BaseDirectory);
         RegisterGlobalExceptionLogging(logger);
-        logger.Log(AppLogLevel.Info, "APP", "Aplicacion iniciada.");
+        string appVersion = Application.ProductVersion;
+        logger.Log(AppLogLevel.Info, "APP", $"Aplicacion iniciada. Version={appVersion}.");
 
         try
         {
             Application.Run(new MainForm(logger));
-            logger.Log(AppLogLevel.Info, "APP", "Aplicacion finalizada.");
+            logger.Log(AppLogLevel.Info, "APP", $"Aplicacion finalizada. Version={appVersion}.");
         }
         catch (Exception ex)
         {

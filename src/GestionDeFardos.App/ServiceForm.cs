@@ -6,7 +6,9 @@ namespace GestionDeFardos.App;
 
 public sealed class ServiceForm : Form
 {
-    private readonly IServicePortMonitor _servicePortMonitor;
+    private readonly IWeighingRuntime _weighingRuntime;
+    private readonly IWeighingRepository? _weighingRepository;
+    private readonly IAppLogger _logger;
     private readonly Label _scaleProtocolLabel;
     private readonly Label _scaleProfileLabel;
     private readonly Label _scaleConnectionLabel;
@@ -23,16 +25,22 @@ public sealed class ServiceForm : Form
     private readonly Label _buttonFrameLabel;
     private readonly Label _buttonResponseLabel;
     private readonly Label _buttonActivityLabel;
+    private readonly DateTimePicker _deleteUpToDatePicker;
+    private readonly Button _deleteRecordsButton;
+    private readonly Label _administrationStatusLabel;
     private readonly System.Windows.Forms.Timer _refreshTimer;
+    private bool _deleteInProgress;
 
-    public ServiceForm(IServicePortMonitor servicePortMonitor)
+    public ServiceForm(IWeighingRuntime weighingRuntime, IWeighingRepository? weighingRepository, IAppLogger logger)
     {
-        _servicePortMonitor = servicePortMonitor;
+        _weighingRuntime = weighingRuntime;
+        _weighingRepository = weighingRepository;
+        _logger = logger;
 
         Text = "Modo Service";
         StartPosition = FormStartPosition.CenterParent;
         Width = 780;
-        Height = 760;
+        Height = 790;
 
         var descriptionLabel = new Label
         {
@@ -199,18 +207,46 @@ public sealed class ServiceForm : Form
         {
             Text = "Administracion",
             Location = new Point(20, 615),
-            Size = new Size(720, 90)
+            Size = new Size(720, 120)
         };
 
-        var borradoButton = new Button
+        var deleteDescriptionLabel = new Label
         {
-            Text = "Borrado de fardos (pendiente)",
-            Enabled = false,
+            Text = "Borrar todos los registros desde la fecha seleccionada hacia atras.",
             AutoSize = true,
-            Location = new Point(16, 35)
+            Location = new Point(16, 30)
         };
 
-        administracionGroup.Controls.Add(borradoButton);
+        _deleteUpToDatePicker = new DateTimePicker
+        {
+            Format = DateTimePickerFormat.Short,
+            Location = new Point(16, 56),
+            Width = 140,
+            Value = DateTime.Today
+        };
+
+        _deleteRecordsButton = new Button
+        {
+            Text = "Borrar hasta fecha",
+            AutoSize = true,
+            Location = new Point(176, 54),
+            Enabled = _weighingRepository is not null
+        };
+        _deleteRecordsButton.Click += async (_, _) => await HandleDeleteRecordsRequestedAsync();
+
+        _administrationStatusLabel = new Label
+        {
+            Text = _weighingRepository is null
+                ? "Estado: la base local no esta disponible para ejecutar borrados."
+                : "Estado: listo para borrar registros por fecha.",
+            AutoSize = true,
+            Location = new Point(16, 88)
+        };
+
+        administracionGroup.Controls.Add(deleteDescriptionLabel);
+        administracionGroup.Controls.Add(_deleteUpToDatePicker);
+        administracionGroup.Controls.Add(_deleteRecordsButton);
+        administracionGroup.Controls.Add(_administrationStatusLabel);
 
         Controls.Add(descriptionLabel);
         Controls.Add(balanzaGroup);
@@ -251,7 +287,7 @@ public sealed class ServiceForm : Form
 
     private void RefreshServiceData()
     {
-        ServicePortSnapshot snapshot = _servicePortMonitor.GetSnapshot();
+        ServicePortSnapshot snapshot = _weighingRuntime.GetSnapshot();
 
         _scaleProtocolLabel.Text = $"Protocolo configurado: {FormatValue(snapshot.ScaleProtocol)}";
         _scaleProfileLabel.Text = $"Puerto y perfil: {FormatValue(snapshot.ScalePortProfile)}";
@@ -284,6 +320,80 @@ public sealed class ServiceForm : Form
             ? "Ultima respuesta $B1! enviada: --"
             : $"Ultima respuesta $B1! enviada: {snapshot.LastButtonResponse}";
         _buttonActivityLabel.Text = FormatButtonActivity(snapshot);
+    }
+
+    private async Task HandleDeleteRecordsRequestedAsync()
+    {
+        if (_deleteInProgress)
+        {
+            return;
+        }
+
+        if (_weighingRepository is null)
+        {
+            _administrationStatusLabel.Text = "Estado: la base local no esta disponible para ejecutar borrados.";
+            return;
+        }
+
+        DateTime selectedDate = _deleteUpToDatePicker.Value.Date;
+        DateTime toInclusive = selectedDate.AddDays(1).AddTicks(-1);
+        string displayDate = selectedDate.ToString("dd/MM/yyyy");
+
+        DialogResult firstConfirmation = MessageBox.Show(
+            $"Se borraran todos los registros con fecha hasta {displayDate} inclusive.\n\nEsta accion no se puede deshacer.\n\nDesea continuar?",
+            "Confirmar borrado historico",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (firstConfirmation != DialogResult.Yes)
+        {
+            _administrationStatusLabel.Text = $"Estado: borrado cancelado para la fecha {displayDate}.";
+            return;
+        }
+
+        DialogResult secondConfirmation = MessageBox.Show(
+            $"Confirmacion final.\n\nSe eliminaran definitivamente todos los registros hasta {displayDate} inclusive.\n\nDesea ejecutar el borrado ahora?",
+            "Confirmacion final de borrado",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+
+        if (secondConfirmation != DialogResult.Yes)
+        {
+            _administrationStatusLabel.Text = $"Estado: borrado cancelado en la confirmacion final para la fecha {displayDate}.";
+            return;
+        }
+
+        try
+        {
+            SetDeleteUiState(true);
+            int deletedCount = await _weighingRepository.DeleteUpToAsync(toInclusive);
+            _weighingRuntime.RefreshLastSavedRecord();
+            _administrationStatusLabel.Text = $"Estado: se borraron {deletedCount} registros hasta {displayDate} inclusive.";
+
+            _logger.Log(AppLogLevel.Info, "SERVICE", $"Borrado historico ejecutado desde Service. FechaHasta={displayDate}, Registros={deletedCount}.");
+
+            MessageBox.Show(
+                $"Borrado historico completado.\n\nFecha hasta: {displayDate}\nRegistros eliminados: {deletedCount}",
+                "Borrado completado",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _administrationStatusLabel.Text = $"Estado: error al borrar hasta {displayDate}.";
+            _logger.Log(AppLogLevel.Error, "SERVICE", $"No se pudo ejecutar el borrado historico hasta {displayDate}: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo ejecutar el borrado historico solicitado.\n" +
+                $"Detalle: {ex.Message}",
+                "Error de borrado",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetDeleteUiState(false);
+        }
     }
 
     private static string FormatValue(string value)
@@ -326,5 +436,14 @@ public sealed class ServiceForm : Form
         }
 
         return "Ultima opresion / diagnostico: --";
+    }
+
+    private void SetDeleteUiState(bool isDeleting)
+    {
+        _deleteInProgress = isDeleting;
+        _deleteRecordsButton.Enabled = !isDeleting && _weighingRepository is not null;
+        _deleteUpToDatePicker.Enabled = !isDeleting;
+        UseWaitCursor = isDeleting;
+        Cursor.Current = isDeleting ? Cursors.WaitCursor : Cursors.Default;
     }
 }

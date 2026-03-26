@@ -740,7 +740,7 @@ public sealed class MainForm : Form
     private static string BuildExportFilePath(string exportDirectory, DateTime fromDate, DateTime toDate)
     {
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string fileName = $"pesadas_{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}_{timestamp}.xlsx";
+        string fileName = $"pesadas_desde_{fromDate:yyyyMMdd}_hasta_{toDate:yyyyMMdd}_hecha_{timestamp}.xlsx";
         return Path.Combine(exportDirectory, fileName);
     }
 

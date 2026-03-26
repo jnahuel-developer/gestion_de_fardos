@@ -7,4 +7,6 @@ public sealed class WeighingRecord
     public decimal WeightKg { get; set; }
     public int? RawGrams { get; set; }
     public string? RawFrame { get; set; }
+    public bool IsEditedToZero { get; set; }
+    public DateTime? EditedAt { get; set; }
 }

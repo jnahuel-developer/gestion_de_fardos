@@ -17,6 +17,9 @@
     "StopBits": "One",
     "Handshake": "None"
   },
+  "Database": {
+    "FilePath": "data\\gestion-de-fardos.db"
+  },
   "Thresholds": {
     "MinKg": 20.0,
     "MaxKg": 80.0

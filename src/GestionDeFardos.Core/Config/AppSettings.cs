@@ -4,6 +4,7 @@ public sealed class AppSettings
 {
     public ScaleSettings Scale { get; set; } = new();
     public ButtonSettings Button { get; set; } = new();
+    public DatabaseSettings Database { get; set; } = new();
     public ThresholdSettings Thresholds { get; set; } = new();
     public PasswordSettings Passwords { get; set; } = new();
     public ExportSettings Export { get; set; } = new();
@@ -29,6 +30,11 @@ public sealed class ButtonSettings
     public string Parity { get; set; } = "None";
     public string StopBits { get; set; } = "One";
     public string Handshake { get; set; } = "None";
+}
+
+public sealed class DatabaseSettings
+{
+    public string FilePath { get; set; } = "data\\gestion-de-fardos.db";
 }
 
 public sealed class ThresholdSettings

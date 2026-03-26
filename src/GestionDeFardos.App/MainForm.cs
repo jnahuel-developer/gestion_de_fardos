@@ -21,6 +21,7 @@ public sealed class MainForm : Form
     private readonly AppSettings _settings;
     private readonly string _configPath;
     private readonly bool _configFileExists;
+    private readonly bool _configLoadedSuccessfully;
     private ServiceForm? _serviceForm;
 
     public MainForm(IAppLogger logger)
@@ -28,7 +29,8 @@ public sealed class MainForm : Form
         _logger = logger;
         _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
         _configFileExists = File.Exists(_configPath);
-        _settings = LoadAppSettings();
+        (_settings, _configLoadedSuccessfully) = LoadAppSettings();
+        EnsureDatabaseReady();
 
         Text = "Gestion de Fardos";
         StartPosition = FormStartPosition.CenterScreen;
@@ -58,7 +60,7 @@ public sealed class MainForm : Form
         FormClosed += OnMainFormClosed;
     }
 
-    private AppSettings LoadAppSettings()
+    private (AppSettings Settings, bool WasLoadedSuccessfully) LoadAppSettings()
     {
         var configLoader = new ConfigLoader();
 
@@ -66,7 +68,7 @@ public sealed class MainForm : Form
         {
             AppSettings settings = configLoader.Load(AppContext.BaseDirectory);
             _logger.Log(AppLogLevel.Info, "CONFIG", $"Configuracion cargada desde {_configPath}.");
-            return settings;
+            return (settings, true);
         }
         catch (Exception ex)
         {
@@ -79,7 +81,35 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
 
-            return new AppSettings();
+            return (new AppSettings(), false);
+        }
+    }
+
+    private void EnsureDatabaseReady()
+    {
+        if (!_configFileExists || !_configLoadedSuccessfully)
+        {
+            _logger.Log(AppLogLevel.Warning, "DB", "La base local no se inicializa porque config.json no esta disponible o no se pudo cargar correctamente.");
+            return;
+        }
+
+        try
+        {
+            var repository = new SqliteWeighingRepository(AppContext.BaseDirectory, _settings.Database, _logger);
+            repository.InitializeAsync().GetAwaiter().GetResult();
+            _logger.Log(AppLogLevel.Info, "DB", $"Repositorio local preparado en {repository.GetDatabasePath()}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(AppLogLevel.Error, "DB", $"No se pudo inicializar la base local: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo inicializar la base local de pesadas.\n" +
+                $"Detalle: {ex.Message}\n\n" +
+                "La aplicacion continuara abierta, pero la persistencia local queda pendiente de revision.",
+                "Advertencia de base local",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
     }
 

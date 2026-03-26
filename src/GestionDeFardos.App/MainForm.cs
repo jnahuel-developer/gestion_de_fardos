@@ -43,6 +43,7 @@ public sealed class MainForm : Form
     private readonly Button _editRecordButton;
     private readonly Button _exportButton;
     private readonly System.Windows.Forms.Timer _refreshTimer;
+    private bool _exportInProgress;
     private ServiceForm? _serviceForm;
 
     public MainForm(IAppLogger logger)
@@ -203,7 +204,7 @@ public sealed class MainForm : Form
         };
         _exportButton.FlatAppearance.BorderColor = Color.FromArgb(209, 216, 223);
         _exportButton.FlatAppearance.BorderSize = 1;
-        _exportButton.Click += (_, _) => HandleExportRequested();
+        _exportButton.Click += async (_, _) => await HandleExportRequestedAsync();
 
         actionsPanel.Controls.Add(actionsTitleLabel);
         actionsPanel.Controls.Add(actionsDescriptionLabel);
@@ -452,8 +453,13 @@ public sealed class MainForm : Form
         }
     }
 
-    private void HandleExportRequested()
+    private async Task HandleExportRequestedAsync()
     {
+        if (_exportInProgress)
+        {
+            return;
+        }
+
         if (_weighingRepository is null)
         {
             _logger.Log(AppLogLevel.Warning, "EXPORT", "No se puede exportar porque la base local no esta disponible.");
@@ -490,13 +496,12 @@ public sealed class MainForm : Form
 
         try
         {
+            SetExportUiState(true);
+
             DateTime fromInclusive = prompt.FromDate.Date;
             DateTime toInclusive = prompt.ToDate.Date.AddDays(1).AddTicks(-1);
 
-            IReadOnlyList<WeighingRecord> records = _weighingRepository
-                .ListByDateRangeAsync(fromInclusive, toInclusive)
-                .GetAwaiter()
-                .GetResult();
+            IReadOnlyList<WeighingRecord> records = await _weighingRepository.ListByDateRangeAsync(fromInclusive, toInclusive);
 
             if (records.Count == 0)
             {
@@ -511,7 +516,7 @@ public sealed class MainForm : Form
             }
 
             string outputPath = BuildExportFilePath(exportDirectory, prompt.FromDate, prompt.ToDate);
-            _reportExporter.ExportAsync(records, outputPath).GetAwaiter().GetResult();
+            await _reportExporter.ExportAsync(records, outputPath);
 
             _logger.Log(AppLogLevel.Info, "EXPORT", $"Exportacion finalizada. Archivo={outputPath}, Registros={records.Count}.");
 
@@ -531,6 +536,10 @@ public sealed class MainForm : Form
                 "Error de exportacion",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetExportUiState(false);
         }
     }
 
@@ -733,6 +742,15 @@ public sealed class MainForm : Form
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string fileName = $"pesadas_{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}_{timestamp}.xlsx";
         return Path.Combine(exportDirectory, fileName);
+    }
+
+    private void SetExportUiState(bool isExporting)
+    {
+        _exportInProgress = isExporting;
+        _exportButton.Enabled = !isExporting;
+        _editRecordButton.Enabled = !isExporting;
+        UseWaitCursor = isExporting;
+        Cursor.Current = isExporting ? Cursors.WaitCursor : Cursors.Default;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

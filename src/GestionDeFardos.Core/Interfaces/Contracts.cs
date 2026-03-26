@@ -13,6 +13,7 @@ public interface IServicePortMonitor
 public interface IWeighingRuntime : IServicePortMonitor
 {
     WeighingRuntimeSnapshot GetOperationSnapshot();
+    void RefreshLastSavedRecord();
 }
 
 public interface IAppLogger

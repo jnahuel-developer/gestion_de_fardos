@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
-    [string]$Version = '1.0.0'
+    [string]$Version = '1.1.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,7 +12,7 @@ $publishDir = Join-Path $repoRoot "artifacts\publish\$Runtime"
 $publishDocsDir = Join-Path $publishDir 'docs'
 $projectPath = Join-Path $repoRoot 'src\GestionDeFardos.App\GestionDeFardos.App.csproj'
 $configTemplatePath = Join-Path $repoRoot 'samples\config.example.json'
-$clientGuidePath = Join-Path $repoRoot 'docs\instalacion_cliente.md'
+$docsSourceDir = Join-Path $repoRoot 'docs'
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw "[ERROR] No se encontro 'dotnet' en el PATH."
@@ -42,6 +42,6 @@ finally {
 
 Copy-Item $configTemplatePath (Join-Path $publishDir 'config.example.json') -Force
 Copy-Item $configTemplatePath (Join-Path $publishDir 'config.template.json') -Force
-Copy-Item $clientGuidePath (Join-Path $publishDocsDir 'instalacion_cliente.md') -Force
+Copy-Item (Join-Path $docsSourceDir '*.md') $publishDocsDir -Force
 
 Write-Host "[INFO] Publicacion lista en: $publishDir"

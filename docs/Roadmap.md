@@ -1,114 +1,66 @@
 # Roadmap de Desarrollo
 
-## Estado actual
+## Estado final
 
-- La Etapa 1 se considera finalizada.
-- Ya están resueltos el esqueleto WinForms, el acceso a Service, la lectura de balanza y la lectura del pulsador.
-- La versión 1.0.0 fue instalada y validada en el cliente.
+- Etapa 1: completada
+- Etapa 2: completada
+- Version objetivo de cierre: `1.1.0`
 
-## Objetivo de Etapa 2
+## Mods implementadas
 
-Completar la operación funcional de la app con:
+### `mod0005`
 
-- base de datos local
-- registro de pesadas
+- Base local SQLite
+- modelo de datos de pesadas
+- bootstrap automatico
+
+### `mod0006`
+
+- runtime compartido
+- captura automatica al pulsador
+- validacion por thresholds
+
+### `mod0007`
+
 - pantalla principal operativa
-- edición de registros
-- exportación a Excel
-- borrado histórico desde Service
+- peso actual
+- estado de ultima opresion
+- ultimo registro guardado
 
-## Estrategia de ramas
+### `mod0008`
 
-- Cada desarrollo parte desde `develop`.
-- Cada entrega funcional usa una rama `modxxxx`.
-- Cada mod debe cerrar con:
-  - compilación correcta
-  - validación manual mínima
-  - push a remoto
-- El merge a `develop` se realiza manualmente luego de la validación.
+- edicion de registros por numero
+- validacion de `Passwords.Edit`
+- actualizacion a cero
 
-## Plan incremental
+### `mod0009`
 
-### `mod0005` - Base local y modelo de datos
+- exportacion a Excel
+- rango de fechas
+- salida `.xlsx`
 
-- Incorporar SQLite con `Microsoft.Data.Sqlite`.
-- Agregar `Database.FilePath` a la configuración.
-- Crear bootstrap automático de base.
-- Implementar `SqliteWeighingRepository`.
-- Ampliar `WeighingRecord` y `IWeighingRepository`.
-- Validación:
-  - la base se crea
-  - se puede insertar
-  - se puede leer la última pesada
+### `mod0010`
 
-### `mod0006` - Motor de captura y coordinación
+- borrado historico desde Service
+- doble confirmacion
+- refresco del ultimo registro
 
-- Introducir un runtime compartido para pantalla principal y Service.
-- Consumir balanza y pulsador desde un flujo técnico único.
-- Guardar la pesada cuando se detecte `$P1!`.
-- Bloquear guardado fuera de thresholds.
-- Validación:
-  - una pulsación guarda o rechaza con motivo
-  - Service sigue funcionando sin conflicto
+### `mod0011`
 
-### `mod0007` - Pantalla principal operativa
+- cierre de UX y logging
+- alineacion de version final
+- documentacion operativa final
+- scripts de publicacion e instalador preparados para la entrega
 
-- Reemplazar el placeholder por la UI real.
-- Mostrar peso actual, estado de conexión, última opresión y último registro guardado.
-- Agregar botones `Editar registro` y `Exportar a Excel`.
-- Quitar datos de configuración y guía de acceso a Service de la pantalla principal.
-- Validación:
-  - la pantalla refleja peso vivo y última captura
+## Resultado funcional final
 
-### `mod0008` - Edición de registros
+La app final permite:
 
-- Implementar edición por número de pesada.
-- Pedir `Passwords.Edit`.
-- Dejar el peso en cero y conservar el registro.
-- Validación:
-  - edición correcta
-  - rechazo por contraseña incorrecta
-  - rechazo por id inexistente
-
-### `mod0009` - Exportación a Excel
-
-- Implementar exportación `.xlsx` con `ClosedXML`.
-- Pedir rango `desde / hasta`.
-- Exportar columnas:
-  - `Nro de Fardo`
-  - `Dia`
-  - `Hora`
-  - `Kg`
-- Validación:
-  - archivo Excel válido
-  - contenido correcto
-  - manejo de rango vacío
-
-### `mod0010` - Borrado histórico desde Service
-
-- Activar el borrado por fecha en Service.
-- Pedir fecha inicial.
-- Borrar todo hacia atrás desde esa fecha.
-- Exigir doble confirmación.
-- Validación:
-  - borrado efectivo
-  - confirmación doble
-  - resultado visible
-
-### `mod0011` - Cierre y entrega final
-
-- Ajustes de UX, mensajes y logs.
-- Actualización completa de documentación operativa.
-- Checklist end-to-end con simulador.
-- Preparación de instalador final.
-
-## Criterio de cierre del proyecto
-
-El proyecto se considera completo cuando:
-
-- la pantalla principal funciona en operación real
-- las pesadas se guardan en base local
-- se puede editar una pesada
-- se puede exportar a Excel
-- Service puede borrar histórico
-- la documentación y el instalador quedan actualizados
+- leer balanza y pulsador por puertos independientes
+- guardar pesadas automaticamente
+- rechazar capturas fuera de rango
+- editar registros
+- exportar a Excel
+- diagnosticar la comunicacion en Service
+- borrar historico por fecha
+- operar con base local SQLite

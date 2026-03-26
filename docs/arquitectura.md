@@ -1,74 +1,120 @@
-# Arquitectura base
+# Arquitectura
 
 ## Capas
 
-- **GestionDeFardos.App**: interfaz WinForms, pantalla principal y acceso a Service.
-- **GestionDeFardos.Core**: configuracion, modelos, contratos y reglas puras.
-- **GestionDeFardos.Infrastructure**: configuracion, logging, monitoreo serial y persistencia local.
-
-## Persistencia local
-
-- La Etapa 2 incorpora una base SQLite local.
-- La ruta sale de `Database.FilePath` en `config.json`.
-- El archivo se resuelve relativo a `AppContext.BaseDirectory` cuando no es una ruta absoluta.
-- El bootstrap de base se ejecuta al iniciar la aplicacion.
-
-## Modelo de pesada local
-
-La persistencia base de `WeighingRecord` contempla:
-
-- `Id`: autonumerico creciente
-- `Timestamp`: fecha y hora de captura
-- `WeightKg`: valor de negocio exportable
-- `RawGrams`: lectura cruda en gramos, si existe
-- `RawFrame`: trama o dato crudo asociado, si existe
-- `IsEditedToZero`: marca minima de auditoria para edicion
-- `EditedAt`: fecha y hora de edicion a cero
-
-## Repositorio de pesadas
-
-`IWeighingRepository` queda preparado para cubrir:
-
-- inicializacion de la base
-- insercion
-- consulta por id
-- obtencion de ultima pesada
-- listado por rango de fechas
-- edicion a cero
-- borrado historico por fecha
-
-La implementacion actual es `SqliteWeighingRepository`.
+- `GestionDeFardos.App`
+  - WinForms
+  - pantalla principal
+  - Modo Service
+  - popups de edicion y exportacion
+- `GestionDeFardos.Core`
+  - configuracion
+  - contratos
+  - modelos
+  - utilidades puras
+- `GestionDeFardos.Infrastructure`
+  - configuracion
+  - logging a archivo
+  - monitoreo serial
+  - persistencia SQLite
+  - exportacion Excel
 
 ## Runtime compartido
 
-- La app arranca un unico `IWeighingRuntime` desde `MainForm`.
-- `ServiceForm` consume el snapshot tecnico del runtime ya iniciado y no abre puertos por su cuenta.
+- La app crea un unico `IWeighingRuntime` al iniciar.
+- `MainForm` y `ServiceForm` consumen el mismo runtime.
+- Service no abre puertos por su cuenta.
 - La implementacion actual es `SerialServicePortMonitor`.
-- El runtime administra dos `SerialPort` independientes:
-  - uno para balanza
-  - uno para pulsador
-- El runtime expone dos vistas de estado:
-  - snapshot tecnico para Service
-  - snapshot funcional para la pantalla principal
 
-## Balanza
+## Canales seriales
 
-- La configuracion fisica del puerto sale de `Scale.PortName`, `BaudRate`, `DataBits`, `Parity`, `StopBits` y `Handshake`.
-- `Scale.Protocol` solo define como interpretar los bytes recibidos.
+### Balanza
+
+- Puerto propio.
+- Interpretacion por protocolo configurable.
 - Protocolos soportados:
   - `w180-t`
   - `simple-ascii`
-- Si el protocolo configurado no es soportado, la app sigue mostrando recepcion cruda para diagnostico.
 
-## Pulsador y captura
+### Pulsador
 
-- El pulsador usa otro puerto serie y su propia configuracion fisica.
-- La app escucha la secuencia `$P1!`.
-- Cuando la recibe, responde `$B1!`.
-- Cada `$P1!` dispara un intento de guardado usando el ultimo peso valido interpretado.
-- El guardado se rechaza cuando no hay peso valido o cuando el valor queda fuera de `Thresholds.MinKg` y `Thresholds.MaxKg`.
+- Puerto propio.
+- La app escucha `$P1!`.
+- La app responde `$B1!`.
+
+## Persistencia local
+
+- Base SQLite local.
+- Ruta definida por `Database.FilePath`.
+- Bootstrap automatico al iniciar la app.
+- Implementacion actual: `SqliteWeighingRepository`.
+
+## Modelo de pesada
+
+`WeighingRecord` persiste:
+
+- `Id`
+- `Timestamp`
+- `WeightKg`
+- `RawGrams`
+- `RawFrame`
+- `IsEditedToZero`
+- `EditedAt`
+
+## Flujo de captura
+
+1. La balanza actualiza el ultimo peso valido.
+2. El pulsador envia `$P1!`.
+3. La app responde `$B1!`.
+4. El runtime valida thresholds.
+5. Si el peso es valido, lo guarda en SQLite.
+6. Si no es valido, informa rechazo sin insertar.
+
+## Edicion
+
+- La pantalla principal permite seleccionar una pesada por numero.
+- Se valida `Passwords.Edit`.
+- El peso se actualiza a `0`.
+- El registro se conserva para auditoria minima.
+
+## Exportacion
+
+- La pantalla principal pide un rango de fechas.
+- Consulta registros en SQLite.
+- Genera `.xlsx` con `ClosedXML`.
+- La implementacion actual es `ClosedXmlReportExporter`.
+
+## Modo Service
+
+Service expone:
+
+- snapshot tecnico de balanza
+- snapshot tecnico de pulsador
+- chunk raw
+- trama interpretada
+- diagnosticos
+- borrado historico por fecha
+
+El borrado historico:
+
+- usa doble confirmacion
+- elimina registros hasta una fecha inclusive
+- refresca el ultimo registro del runtime
 
 ## Logging
 
-- Los eventos se persisten en `./logs/gestion-de-fardos-YYYYMMDD.log`.
-- Se registran apertura y cierre de puertos, recepcion cruda, interpretacion de tramas, eventos del pulsador y persistencia local.
+- Implementacion actual: `FileAppLogger`
+- Destino: `./logs`
+- Archivo: `gestion-de-fardos-YYYYMMDD.log`
+
+Se registran:
+
+- inicio y cierre
+- apertura y cierre de puertos
+- recepcion raw
+- interpretacion de balanza
+- eventos del pulsador
+- guardados
+- ediciones
+- exportaciones
+- borrados

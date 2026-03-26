@@ -1,71 +1,166 @@
 # Manual operativo
 
+## Objetivo
+
+La aplicacion permite operar la captura de pesadas con balanza y pulsador seriales, guardar los registros en una base local, corregir pesadas, exportarlas a Excel y diagnosticar la comunicacion desde Modo Service.
+
+## Inicio de la aplicacion
+
+1. Verificar `config.json` junto al ejecutable.
+2. Abrir `GestionDeFardos.App.exe`.
+3. Esperar la apertura de la pantalla principal.
+
+Al iniciar:
+
+- se carga la configuracion
+- se prepara la base local
+- se abre el runtime compartido
+- se inician la balanza y el pulsador segun lo definido en `config.json`
+
+## Pantalla principal
+
+La pantalla principal muestra:
+
+- peso actual en kg
+- estado de conexion de la balanza
+- ultima opresion del pulsador
+- ultimo registro guardado
+- boton `Editar registro`
+- boton `Exportar a Excel`
+
+La pantalla principal no expone parametros de configuracion ni instrucciones de acceso tecnico.
+
+## Captura automatica
+
+- La balanza entrega el peso actual por su puerto serie.
+- El pulsador trabaja por otro puerto.
+- Cuando la app recibe `$P1!`, responde `$B1!`.
+- Con cada `$P1!`, la app intenta guardar una pesada usando el ultimo peso valido disponible.
+
+Condiciones de rechazo:
+
+- no hay peso valido
+- el peso esta fuera de `Thresholds.MinKg` y `Thresholds.MaxKg`
+- falla la persistencia local
+
+En todos los casos el resultado queda visible en la pantalla principal.
+
+## Edicion de registros
+
+Desde `Editar registro`:
+
+1. Se solicita el numero de pesada.
+2. Se solicita `Passwords.Edit`.
+3. Si la clave es correcta, la pesada se actualiza a `0`.
+
+Reglas:
+
+- el registro no se elimina
+- el cambio queda marcado como edicion
+- si no hay registros, el popup no se abre
+- el selector de numero queda limitado al ultimo Id actual
+
+## Exportacion a Excel
+
+Desde `Exportar a Excel`:
+
+1. Se solicita un rango `Desde / Hasta`.
+2. La app busca registros en la base local.
+3. Si hay datos, genera un `.xlsx` en `Export.Folder`.
+
+Nombre del archivo:
+
+- `pesadas_desde_YYYYMMDD_hasta_YYYYMMDD_hecha_YYYYMMDD_HHMMSS.xlsx`
+
+Columnas exportadas:
+
+- `Nro de Fardo`
+- `Dia`
+- `Hora`
+- `Kg`
+
 ## Acceso a Modo Service
 
-1. Con la aplicacion abierta, presione `Ctrl+Shift+S` o `Ctrl+Alt+Shift+S`.
-2. Se abrira un cuadro modal para ingresar la contrasena de Service.
-3. Ingrese la contrasena y presione **Aceptar**.
-4. Si la contrasena es correcta, se abrira la pantalla **Modo Service**.
+Atajos disponibles:
 
-## Configuracion de `config.json`
+- `Ctrl+Shift+S`
+- `Ctrl+Alt+Shift+S`
 
-- El archivo debe ubicarse en `AppContext.BaseDirectory`.
-- Puede copiarse desde `samples/config.example.json`.
-- `Passwords.Service` debe existir y contener un valor no vacio.
+Flujo:
 
-## Configuracion de balanza serial
+1. Se abre un modal de contrasena.
+2. Se valida `Passwords.Service`.
+3. Si la clave es correcta, se abre la pantalla Service.
 
-En la seccion `Scale` se deben completar:
+## Que muestra Modo Service
 
-- `Protocol`
-- `PortName`
-- `BaudRate`
-- `DataBits`
-- `Parity`
-- `StopBits`
-- `Handshake`
-- `NewLine`
+### Balanza
 
-Notas:
+- protocolo configurado
+- puerto y perfil serie
+- estado de conexion
+- ultimo chunk crudo
+- ultima trama interpretada
+- peso y tara interpretados
+- ultimo error o diagnostico
 
-- `Protocol` define como interpretar los datos, no como abrir el puerto.
-- Protocolos soportados:
-  - `w180-t`
-  - `simple-ascii`
-- Si el protocolo configurado no es soportado, Service abre igual y muestra solo recepcion cruda.
-- `NewLine` solo aplica a `simple-ascii`.
+### Pulsador
 
-## Configuracion del pulsador
+- puerto y perfil serie
+- estado de conexion
+- ultimo chunk crudo
+- ultima trama `$P1!`
+- ultima respuesta `$B1!`
+- ultimo error o diagnostico
 
-En la seccion `Button` se deben completar:
+### Administracion
 
-- `PortName`
-- `BaudRate`
-- `DataBits`
-- `Parity`
-- `StopBits`
-- `Handshake`
+- selector de fecha
+- boton `Borrar hasta fecha`
+- doble confirmacion obligatoria
+- resultado visible de cantidad de registros borrados
 
-Notas:
+## Borrado historico
 
-- El pulsador usa un puerto distinto al de la balanza.
-- La app escucha `$P1!` y responde `$B1!`.
-- Si `Button.PortName` queda vacio, Service abre con el pulsador deshabilitado.
+El borrado desde Service elimina todos los registros con fecha hasta la fecha seleccionada inclusive.
 
-## Que muestra la pantalla Service
+Reglas:
 
-- Protocolo configurado para la balanza.
-- Puerto y perfil serie efectivo de balanza y pulsador.
-- Estado de conexion de ambos canales.
-- Ultimo chunk crudo recibido de la balanza.
-- Ultima trama interpretada correctamente.
-- Peso y tara interpretados, si existen.
-- Ultimo chunk crudo del pulsador.
-- Ultima trama `$P1!` recibida y ultima respuesta `$B1!` enviada.
-- Error o diagnostico del ultimo intento de lectura o interpretacion.
+- requiere doble confirmacion
+- refresca el ultimo registro mostrado por la app
+- informa cantidad de registros borrados
 
-## Logging basico
+## Logs
 
-- Los logs se guardan en `./logs` junto al ejecutable.
-- El archivo diario se llama `gestion-de-fardos-YYYYMMDD.log`.
-- Se registran apertura y cierre de ambos puertos, chunks crudos recibidos, interpretacion de tramas, `BUTTON RX $P1!`, `BUTTON TX $B1!` y errores.
+Ubicacion:
+
+- `.\logs`
+
+Archivo:
+
+- `gestion-de-fardos-YYYYMMDD.log`
+
+Se registran:
+
+- inicio y cierre de la app
+- apertura y cierre de puertos
+- recepcion raw
+- tramas interpretadas
+- eventos de captura
+- ediciones
+- exportaciones
+- borrados historicos
+- errores
+
+## Configuracion operativa
+
+`config.json` define:
+
+- `Scale`
+- `Button`
+- `Database`
+- `Thresholds`
+- `Passwords`
+- `Export`
+
+Todo cambio en `config.json` requiere reiniciar la app.

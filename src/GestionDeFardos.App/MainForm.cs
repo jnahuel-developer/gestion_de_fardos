@@ -630,7 +630,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _serviceForm = new ServiceForm(_weighingRuntime);
+        _serviceForm = new ServiceForm(_weighingRuntime, _weighingRepository, _logger);
         _serviceForm.FormClosed += (_, _) =>
         {
             _logger.Log(AppLogLevel.Info, "SERVICE", "Modo Service cerrado.");

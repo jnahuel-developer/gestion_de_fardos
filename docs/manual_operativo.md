@@ -1,69 +1,171 @@
 # Manual operativo
 
+## Objetivo
+
+La aplicacion permite operar la captura de pesadas con balanza y pulsador seriales, guardar los registros en una base local, corregir pesadas, exportarlas a Excel y diagnosticar la comunicacion desde Modo Service.
+
+## Inicio de la aplicacion
+
+1. Verificar `config.json` junto al ejecutable.
+2. Abrir `GestionDeFardos.App.exe`.
+3. Esperar la apertura de la pantalla principal.
+
+Al iniciar:
+
+- se carga la configuracion
+- se prepara la base local
+- se abre el runtime compartido
+- se inician la balanza y el pulsador segun lo definido en `config.json`
+
+En `Scale` tambien se define la interpretacion decimal:
+
+- `WeightDecimalDigits`: digitos a la derecha de la coma para el peso
+- `TareDecimalDigits`: digitos a la derecha de la coma para la tara
+
+## Pantalla principal
+
+La pantalla principal muestra:
+
+- peso actual en kg
+- estado de conexion de la balanza
+- ultima opresion del pulsador
+- ultimo registro guardado
+- boton `Editar registro`
+- boton `Exportar a Excel`
+
+La pantalla principal no expone parametros de configuracion ni instrucciones de acceso tecnico.
+
+## Captura automatica
+
+- La balanza entrega el peso actual por su puerto serie.
+- El pulsador trabaja por otro puerto.
+- Cuando la app recibe `$P1!`, responde `$B1!`.
+- Con cada `$P1!`, la app intenta guardar una pesada usando el ultimo peso valido disponible.
+
+Condiciones de rechazo:
+
+- no hay peso valido
+- el peso esta fuera de `Thresholds.MinKg` y `Thresholds.MaxKg`
+- falla la persistencia local
+
+En todos los casos el resultado queda visible en la pantalla principal.
+
+## Edicion de registros
+
+Desde `Editar registro`:
+
+1. Se solicita el numero de pesada.
+2. Se solicita `Passwords.Edit`.
+3. Si la clave es correcta, la pesada se actualiza a `0`.
+
+Reglas:
+
+- el registro no se elimina
+- el cambio queda marcado como edicion
+- si no hay registros, el popup no se abre
+- el selector de numero queda limitado al ultimo Id actual
+
+## Exportacion a Excel
+
+Desde `Exportar a Excel`:
+
+1. Se solicita un rango `Desde / Hasta`.
+2. La app busca registros en la base local.
+3. Si hay datos, genera un `.xlsx` en `Export.Folder`.
+
+Nombre del archivo:
+
+- `pesadas_desde_YYYYMMDD_hasta_YYYYMMDD_hecha_YYYYMMDD_HHMMSS.xlsx`
+
+Columnas exportadas:
+
+- `Nro de Fardo`
+- `Dia`
+- `Hora`
+- `Kg`
+
 ## Acceso a Modo Service
 
-1. Con la aplicacion abierta, presione `Ctrl+Shift+S` o `Ctrl+Alt+Shift+S`.
-2. Se abrira un cuadro modal para ingresar la contrasena de Service.
-3. Ingrese la contrasena y presione **Aceptar**.
-4. Si la contrasena es correcta, se abrira la pantalla **Modo Service**.
-5. Si la contrasena es incorrecta, se mostrara un mensaje de acceso denegado.
+Atajos disponibles:
 
-## Configuracion de `config.json`
+- `Ctrl+Shift+S`
+- `Ctrl+Alt+Shift+S`
 
-- El archivo debe ubicarse en `AppContext.BaseDirectory`.
-- Puede copiarse desde `samples/config.example.json`.
-- `Passwords.Service` debe existir y contener un valor no vacio.
+Flujo:
 
-## Configuracion de balanza serial
+1. Se abre un modal de contrasena.
+2. Se valida `Passwords.Service`.
+3. Si la clave es correcta, se abre la pantalla Service.
 
-En la seccion `Scale` se deben completar:
+## Que muestra Modo Service
 
-- `PortName`
-- `BaudRate`
-- `Parity`
-- `DataBits`
-- `StopBits`
-- `NewLine`
+### Balanza
 
-## Configuracion del pulsador
+- protocolo configurado
+- puerto y perfil serie
+- estado de conexion
+- ultimo chunk crudo
+- ultima trama interpretada
+- peso y tara interpretados
+- ultimo error o diagnostico
 
-En la seccion `Button` se debe completar:
+### Pulsador
 
-- `InputLine`: `Cts` o `Dsr`
+- puerto y perfil serie
+- estado de conexion
+- ultimo chunk crudo
+- ultima trama `$P1!`
+- ultima respuesta `$B1!`
+- ultimo error o diagnostico
 
-Mapeo recomendado para pruebas con simulador:
+### Administracion
 
-- Simulador con `--button-line rts`: usar `Button.InputLine = Cts`
-- Simulador con `--button-line dtr`: usar `Button.InputLine = Dsr`
+- selector de fecha
+- boton `Borrar hasta fecha`
+- doble confirmacion obligatoria
+- resultado visible de cantidad de registros borrados
 
-## Que muestra la pantalla Service
+## Borrado historico
 
-- Peso convertido a kg.
-- Ultima trama ASCII recibida.
-- Estado de conexion del puerto.
-- Error de puerto o de parseo, si existe.
-- Linea configurada para el pulsador.
-- Estado crudo de `CTS`.
-- Estado crudo de `DSR`.
-- Estado logico del pulsador: `Presionado`, `No presionado` o `Sin lectura`.
-- Ultima opresion detectada o diagnostico del pulsador.
+El borrado desde Service elimina todos los registros con fecha hasta la fecha seleccionada inclusive.
 
-## Logging basico
+Reglas:
 
-- Los logs se guardan en `./logs` junto al ejecutable.
-- El archivo diario se llama `gestion-de-fardos-YYYYMMDD.log`.
-- Se registran eventos de balanza, pulsador, errores de puerto y eventos principales de la aplicacion.
+- requiere doble confirmacion
+- refresca el ultimo registro mostrado por la app
+- informa cantidad de registros borrados
 
-## Actualizacion de version
+## Logs
 
-- Para instalar una nueva version en la misma PC, cerrar la aplicacion y ejecutar el nuevo `GestionDeFardos-Setup-...exe`.
-- Instalar siempre sobre la misma carpeta, por ejemplo `C:\GestionDeFardos`.
-- La reinstalacion preserva `config.json`.
-- No hace falta desinstalar antes de instalar la siguiente version.
+Ubicacion:
 
-## Desinstalacion
+- `.\logs`
 
-- Con el instalador actual de esta etapa, la aplicacion no aparece en la desinstalacion estandar de Windows.
-- Si es necesario quitarla, cerrar la aplicacion y eliminar manualmente la carpeta de instalacion.
-- Si existen accesos directos, eliminarlos manualmente.
-- Respaldar `config.json` y `logs` antes de quitarla si se desea conservar informacion.
+Archivo:
+
+- `gestion-de-fardos-YYYYMMDD.log`
+
+Se registran:
+
+- inicio y cierre de la app
+- apertura y cierre de puertos
+- recepcion raw
+- tramas interpretadas
+- eventos de captura
+- ediciones
+- exportaciones
+- borrados historicos
+- errores
+
+## Configuracion operativa
+
+`config.json` define:
+
+- `Scale`
+- `Button`
+- `Database`
+- `Thresholds`
+- `Passwords`
+- `Export`
+
+Todo cambio en `config.json` requiere reiniciar la app.

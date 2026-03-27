@@ -4,6 +4,7 @@ public sealed class AppSettings
 {
     public ScaleSettings Scale { get; set; } = new();
     public ButtonSettings Button { get; set; } = new();
+    public DatabaseSettings Database { get; set; } = new();
     public ThresholdSettings Thresholds { get; set; } = new();
     public PasswordSettings Passwords { get; set; } = new();
     public ExportSettings Export { get; set; } = new();
@@ -11,23 +12,31 @@ public sealed class AppSettings
 
 public sealed class ScaleSettings
 {
+    public string Protocol { get; set; } = "w180-t";
     public string PortName { get; set; } = "COM1";
     public int BaudRate { get; set; } = 9600;
-    public int DataBits { get; set; } = 8;
-    public string Parity { get; set; } = "None";
-    public string StopBits { get; set; } = "One";
+    public int DataBits { get; set; } = 7;
+    public string Parity { get; set; } = "Even";
+    public string StopBits { get; set; } = "Two";
+    public string Handshake { get; set; } = "None";
     public string NewLine { get; set; } = "\n";
+    public int WeightDecimalDigits { get; set; } = 3;
+    public int TareDecimalDigits { get; set; } = 3;
 }
 
 public sealed class ButtonSettings
 {
-    public string InputLine { get; set; } = nameof(ButtonInputLine.Cts);
+    public string PortName { get; set; } = string.Empty;
+    public int BaudRate { get; set; } = 9600;
+    public int DataBits { get; set; } = 8;
+    public string Parity { get; set; } = "None";
+    public string StopBits { get; set; } = "One";
+    public string Handshake { get; set; } = "None";
 }
 
-public enum ButtonInputLine
+public sealed class DatabaseSettings
 {
-    Cts,
-    Dsr
+    public string FilePath { get; set; } = "data\\gestion-de-fardos.db";
 }
 
 public sealed class ThresholdSettings

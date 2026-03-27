@@ -1,41 +1,140 @@
 # Checklist de pruebas
 
-## Basico de compilacion
+## Build y publicacion
 
-- Restauracion de dependencias de la solucion.
-- Compilacion de Core, Infrastructure y App.
-- Publicacion self-contained `win-x64`.
+- `dotnet restore GestionDeFardos.sln`
+- `dotnet build GestionDeFardos.sln -c Debug`
+- `scripts\release.cmd`
+- `scripts\build-installer.cmd`
 
-## Pruebas manuales - Acceso a Modo Service
+Validar:
 
-- Verificar que `Ctrl+Shift+S` abre el prompt de contrasena.
-- Verificar que `Ctrl+Alt+Shift+S` abre el prompt de contrasena.
-- Verificar que al cancelar no se abre `ServiceForm`.
-- Verificar que contrasena incorrecta muestra error y no abre `ServiceForm`.
-- Verificar que contrasena correcta abre `ServiceForm`.
-- Verificar que si `ServiceForm` ya esta abierta, la hotkey la trae al frente.
+- salida en `artifacts/publish/win-x64`
+- instalador en `artifacts/dist`
+- presencia de `config.example.json`
+- presencia de documentacion `.md` en `publish/docs`
 
-## Pruebas manuales - Service con balanza y pulsador
+## Configuracion inicial
 
-- Preparar `config.json` con `Scale` valida, `Button.InputLine` configurado y `Passwords.Service` completo.
-- Verificar que Service muestra peso convertido, ultima trama ASCII, conexion y error.
-- Verificar que Service muestra la linea configurada y los estados crudos de `CTS` y `DSR`.
-- Verificar que Service muestra el estado logico del pulsador y la ultima opresion.
-- Verificar que con puerto inexistente el formulario no se cierra, muestra estado desconectado y deja las lineas en `Sin lectura`.
-- Verificar que una trama sin entero genera error controlado sin crash.
-- Verificar con simulador `--ui --button-line rts` y `Button.InputLine = Cts` que cada pulso genere una sola opresion.
-- Verificar con simulador `--ui --button-line dtr` y `Button.InputLine = Dsr` el mismo comportamiento.
-- Verificar que un valor invalido en `Button.InputLine` no rompa la lectura de balanza y deje diagnostico claro para el pulsador.
+- Verificar `config.json` valido.
+- Verificar `Scale.Protocol = "w180-t"` por default.
+- Verificar `Scale.WeightDecimalDigits`.
+- Verificar `Scale.TareDecimalDigits`.
+- Verificar `Database.FilePath`.
+- Verificar `Export.Folder`.
+- Verificar `Passwords.Edit`.
+- Verificar `Passwords.Service`.
 
-## Pruebas manuales - Logging
+## Pruebas end-to-end con simulador
 
-- Verificar creacion de la carpeta `logs`.
-- Verificar creacion del archivo diario `gestion-de-fardos-YYYYMMDD.log`.
-- Verificar que se registran apertura/cierre de puerto, tramas de balanza, cambios de lineas y errores.
+### Escenario base
 
-## Pruebas manuales - Instalador
+- App configurada con puertos virtuales correctos.
+- Simulador o puente enviando balanza.
+- Simulador enviando pulsador.
 
-- Verificar instalacion en Windows x64 limpio.
-- Verificar que el instalador deja la app en la ruta writable definida.
-- Verificar que `config.json` existente no se sobreescribe en una reinstalacion.
-- Verificar que el paquete final no contiene codigo fuente.
+Validar:
+
+- peso visible en pantalla principal
+- ultima opresion visible
+- respuesta `$B1!` al pulsador
+
+### Captura correcta
+
+- Enviar un peso dentro de rango.
+- Disparar el pulsador.
+
+Validar:
+
+- se guarda un nuevo registro
+- la pantalla principal actualiza el ultimo registro
+- el dato queda persistido al reiniciar la app
+
+### Captura fuera de rango
+
+- Enviar un peso por debajo o por encima de thresholds.
+- Disparar el pulsador.
+
+Validar:
+
+- la captura se rechaza
+- no se inserta un registro nuevo
+- el motivo queda visible
+
+### Diagnostico raw
+
+- Enviar datos invalidos o mal configurados desde la balanza.
+
+Validar:
+
+- Service abre igual
+- aparece el chunk crudo
+- el error queda visible
+
+## Edicion de registros
+
+- Probar `Editar registro` con `Passwords.Edit` correcta.
+- Probar con clave incorrecta.
+- Probar con base vacia.
+
+Validar:
+
+- el peso pasa a `0`
+- el registro se conserva
+- el ultimo registro visible se refresca si corresponde
+- la clave de Service no habilita la edicion
+
+## Exportacion a Excel
+
+- Exportar un rango con datos.
+- Exportar un rango sin datos.
+
+Validar:
+
+- se genera `.xlsx`
+- nombre del archivo legible con `desde`, `hasta` y `hecha`
+- columnas `Nro de Fardo`, `Dia`, `Hora`, `Kg`
+- los registros editados salen con `0`
+- la UI no queda bloqueada despues de exportar
+
+## Modo Service
+
+- Abrir con `Ctrl+Shift+S`
+- Abrir con `Ctrl+Alt+Shift+S`
+- Probar clave correcta e incorrecta
+
+Validar:
+
+- diagnostico de balanza
+- diagnostico de pulsador
+- chunks raw
+- tramas interpretadas
+
+## Borrado historico
+
+- Seleccionar una fecha con registros previos.
+- Ejecutar las dos confirmaciones.
+
+Validar:
+
+- se borran los registros hasta esa fecha inclusive
+- la cantidad eliminada se informa correctamente
+- el ultimo registro mostrado se refresca
+
+## Logging
+
+- Verificar creacion de `logs`
+- Verificar archivo diario
+
+Confirmar que se registran:
+
+- inicio y cierre de la app
+- apertura y cierre de puertos
+- tramas raw
+- interpretacion de balanza
+- `BUTTON RX $P1!`
+- `BUTTON TX $B1!`
+- guardados
+- ediciones
+- exportaciones
+- borrados

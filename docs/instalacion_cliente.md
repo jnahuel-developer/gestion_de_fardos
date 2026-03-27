@@ -2,75 +2,105 @@
 
 ## Alcance de esta entrega
 
-Esta entrega corresponde al Modulo Service de Gestion de Fardos. Permite validar:
+Esta entrega corresponde a la version final operativa `2.0.0` de Gestion de Fardos.
 
-- Lectura de balanza por puerto serial.
-- Visualizacion de la ultima trama ASCII.
-- Deteccion del pulsador por lineas de control.
-- Registro basico de eventos y errores.
+Incluye:
 
-## Requisitos previos en la PC
-
-- Windows x64.
-- Permisos para ejecutar el instalador.
-- Puerto serial fisico o adaptador USB-Serial correctamente instalado.
-- Driver del adaptador serial instalado, si corresponde.
-- Dato del puerto COM real que usara la balanza.
-- Parametros seriales de la balanza disponibles.
+- lectura de balanza por puerto serie
+- lectura de pulsador por puerto serie independiente
+- guardado automatico en base local
+- edicion de registros
+- exportacion a Excel
+- Modo Service con diagnostico y borrado historico
 
 ## Instalacion
 
-1. Ejecutar el instalador `GestionDeFardos-Setup-...exe`.
-2. Confirmar la carpeta de instalacion propuesta. La recomendada es `C:\GestionDeFardos`.
-3. Finalizar el asistente.
-4. Verificar que la carpeta de instalacion contiene el ejecutable, `config.json` o `config.template.json`, la carpeta `docs` y luego `logs` cuando la app se ejecute.
-
-## Actualizacion a una nueva version
-
-1. Cerrar la aplicacion si estuviera abierta.
-2. Ejecutar el nuevo instalador `GestionDeFardos-Setup-...exe`.
-3. Indicar la misma carpeta de instalacion usada previamente. La recomendada es `C:\GestionDeFardos`.
-4. Finalizar la instalacion.
-5. Verificar que `config.json` conserve los parametros ya validados en planta.
-
-Notas importantes:
-
-- La actualizacion reemplaza los binarios de la aplicacion.
-- `config.json` se preserva automaticamente durante la reinstalacion sobre la misma carpeta.
-- La carpeta `logs` no se incluye dentro del instalador, por lo que el historial existente no se pisa.
-- No es necesario desinstalar primero para pasar de una version a otra en la misma PC.
+1. Ejecutar el instalador `GestionDeFardos-Setup-2.0.0-x64.exe`.
+2. Confirmar la carpeta de destino.
+3. Finalizar la instalacion.
+4. Abrir la carpeta instalada.
 
 ## Configuracion inicial
 
-1. Abrir `config.json` en la carpeta de instalacion.
-2. Completar `Scale.PortName`, `BaudRate`, `Parity`, `DataBits`, `StopBits` y `NewLine`.
-3. Configurar `Button.InputLine` con `Cts` o `Dsr`.
-4. Definir `Passwords.Service`.
-5. Guardar el archivo.
+Antes de usar la app por primera vez:
 
-## Primera validacion en planta
+1. Abrir `config.json`.
+2. Completar `Scale` con el puerto, perfil y posicion decimal de la balanza.
+3. Completar `Button` con el puerto y perfil del pulsador.
+4. Revisar `Database.FilePath`.
+5. Revisar `Thresholds`.
+6. Definir `Passwords.Edit`.
+7. Definir `Passwords.Service`.
+8. Revisar `Export.Folder`.
+9. Guardar el archivo.
+
+Notas:
+
+- `Scale.Protocol` define el formato de datos, no la configuracion fisica del puerto.
+- `Scale.WeightDecimalDigits` define cuantos digitos quedan a la derecha de la coma para el peso.
+- `Scale.TareDecimalDigits` define cuantos digitos quedan a la derecha de la coma para la tara.
+- El valor recomendado por default es `w180-t`.
+- Si cambia `config.json`, hay que cerrar y volver a abrir la aplicacion.
+
+## Primera puesta en marcha
 
 1. Abrir la aplicacion.
-2. Ingresar a Service con `Ctrl+Shift+S` o `Ctrl+Alt+Shift+S`.
-3. Confirmar que se visualizan:
-   - peso convertido
-   - ultima trama ASCII
-   - conexion del puerto
-   - linea configurada
-   - estados de `CTS` y `DSR`
-   - estado del pulsador
-   - ultima opresion o diagnostico
-4. Si la balanza o el pulsador no responden, revisar `logs`.
+2. Confirmar que el peso actual aparece en pantalla.
+3. Confirmar que la ultima opresion cambia al accionar el pulsador.
+4. Confirmar que el ultimo registro guardado se actualiza despues de una captura valida.
 
-## Logs
+## Operacion diaria
 
-- Ubicacion: `logs` junto al ejecutable.
-- Nombre diario: `gestion-de-fardos-YYYYMMDD.log`.
-- Uso principal: diagnostico de lectura serial, pulsador y errores de puerto.
+Desde la pantalla principal se puede:
 
-## Desinstalacion
+- ver el peso actual
+- revisar el estado de la ultima opresion
+- editar una pesada
+- exportar registros a Excel
 
-- Con el instalador actual de esta etapa, la aplicacion no queda registrada en "Aplicaciones instaladas" de Windows.
-- Si se desea retirar la aplicacion, cerrar el programa y eliminar manualmente la carpeta de instalacion, por ejemplo `C:\GestionDeFardos`.
-- Si existen accesos directos en escritorio o menu Inicio, eliminarlos manualmente.
-- Antes de eliminar la carpeta, respaldar `config.json` y `logs` si se desea conservar la configuracion o el historial de validacion.
+## Edicion de registros
+
+1. Presionar `Editar registro`.
+2. Seleccionar el numero de pesada.
+3. Ingresar la contrasena de edicion.
+4. Confirmar.
+
+Resultado:
+
+- la pesada queda en `0`
+- el registro no se elimina
+
+## Exportacion a Excel
+
+1. Presionar `Exportar a Excel`.
+2. Seleccionar `Desde` y `Hasta`.
+3. Confirmar.
+
+Resultado:
+
+- se genera un archivo `.xlsx` en la carpeta configurada en `Export.Folder`
+
+## Modo Service
+
+Para acceder:
+
+- `Ctrl+Shift+S`
+- o `Ctrl+Alt+Shift+S`
+
+Service permite:
+
+- ver diagnostico raw e interpretado de balanza
+- ver diagnostico del pulsador
+- borrar registros historicos por fecha
+
+## Logs y diagnostico
+
+Ubicacion:
+
+- `.\logs`
+
+Archivo diario:
+
+- `gestion-de-fardos-YYYYMMDD.log`
+
+Si hay problemas de comunicacion o de guardado, revisar ese archivo.

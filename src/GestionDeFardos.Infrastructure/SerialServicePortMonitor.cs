@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.IO.Ports;
 using System.Text;
 using GestionDeFardos.Core.Config;
@@ -8,62 +7,96 @@ using GestionDeFardos.Core.Utils;
 
 namespace GestionDeFardos.Infrastructure;
 
-public sealed class SerialServicePortMonitor : IServicePortMonitor
+public sealed class SerialServicePortMonitor : IWeighingRuntime
 {
+    private static readonly byte[] ButtonRequestBytes = Encoding.ASCII.GetBytes("$P1!");
+    private static readonly byte[] ButtonResponseBytes = Encoding.ASCII.GetBytes("$B1!");
+
     private readonly ScaleSettings _scaleSettings;
     private readonly ButtonSettings _buttonSettings;
+    private readonly ThresholdSettings _thresholdSettings;
+    private readonly IWeighingRepository? _weighingRepository;
     private readonly IAppLogger _logger;
     private readonly object _sync = new();
-    private readonly StringBuilder _buffer = new();
+    private readonly List<byte> _scaleBuffer = [];
+    private readonly List<byte> _buttonBuffer = [];
+    private readonly string _configuredScaleProtocol;
+    private readonly int _weightDecimalDigits;
+    private readonly int _tareDecimalDigits;
+    private readonly IScaleProtocol? _scaleProtocol;
 
     private ServicePortSnapshot _snapshot = new();
-    private SerialPort? _serialPort;
-    private ButtonInputLine? _buttonInputLine;
-    private bool? _lastButtonSignalState;
+    private WeighingRuntimeSnapshot _operationSnapshot = new();
+    private SerialPort? _scalePort;
+    private SerialPort? _buttonPort;
+    private bool _started;
 
     public SerialServicePortMonitor(ScaleSettings scaleSettings, ButtonSettings buttonSettings, IAppLogger logger)
+        : this(scaleSettings, buttonSettings, new ThresholdSettings(), null, logger)
+    {
+    }
+
+    public SerialServicePortMonitor(
+        ScaleSettings scaleSettings,
+        ButtonSettings buttonSettings,
+        ThresholdSettings thresholdSettings,
+        IWeighingRepository? weighingRepository,
+        IAppLogger logger)
     {
         _scaleSettings = scaleSettings;
         _buttonSettings = buttonSettings;
+        _thresholdSettings = thresholdSettings;
+        _weighingRepository = weighingRepository;
         _logger = logger;
+        _weightDecimalDigits = WeightConversionHelper.NormalizeDecimalDigits(scaleSettings.WeightDecimalDigits);
+        _tareDecimalDigits = WeightConversionHelper.NormalizeDecimalDigits(scaleSettings.TareDecimalDigits);
+        _configuredScaleProtocol = string.IsNullOrWhiteSpace(scaleSettings.Protocol)
+            ? string.Empty
+            : scaleSettings.Protocol.Trim();
+
+        if (ScaleProtocolCatalog.TryResolve(_configuredScaleProtocol, out IScaleProtocol? scaleProtocol))
+        {
+            _scaleProtocol = scaleProtocol;
+        }
+
+        if (_weightDecimalDigits != scaleSettings.WeightDecimalDigits)
+        {
+            _logger.Log(AppLogLevel.Warning, "CONFIG", $"Scale.WeightDecimalDigits={scaleSettings.WeightDecimalDigits} no es valido. Se usara {_weightDecimalDigits}.");
+        }
+
+        if (_tareDecimalDigits != scaleSettings.TareDecimalDigits)
+        {
+            _logger.Log(AppLogLevel.Warning, "CONFIG", $"Scale.TareDecimalDigits={scaleSettings.TareDecimalDigits} no es valido. Se usara {_tareDecimalDigits}.");
+        }
     }
 
     public void Start()
     {
         lock (_sync)
         {
-            if (_serialPort is not null)
+            if (_started)
             {
                 return;
             }
 
-            try
-            {
-                SerialPort serialPort = BuildSerialPort();
-                serialPort.DataReceived += OnDataReceived;
-                serialPort.PinChanged += OnPinChanged;
-                serialPort.Open();
+            _started = true;
+            _scaleBuffer.Clear();
+            _buttonBuffer.Clear();
+            _snapshot = CreateInitialSnapshot();
+            _operationSnapshot = CreateInitialOperationSnapshot();
+            LoadLastSavedRecord();
 
-                _serialPort = serialPort;
-                _buffer.Clear();
-                _snapshot = CreateConnectedSnapshot();
+            _logger.Log(
+                AppLogLevel.Info,
+                "SERVICE",
+                $"Iniciando runtime compartido. ProtocoloBalanza={DisplayScaleProtocol()}, PerfilBalanza={_snapshot.ScalePortProfile}, PerfilPulsador={_snapshot.ButtonPortProfile}.");
+            _logger.Log(
+                AppLogLevel.Info,
+                "SCALE",
+                $"Configuracion de coma interpretada. DecimalesPeso={_weightDecimalDigits}, DecimalesTara={_tareDecimalDigits}.");
 
-                RefreshControlLineStates();
-                InitializeButtonMonitoring();
-
-                _logger.Log(
-                    AppLogLevel.Info,
-                    "SERVICE",
-                    $"Puerto {_scaleSettings.PortName} abierto. Linea configurada={_snapshot.ConfiguredButtonLine}, CTS={DescribeRawState(_snapshot.CtsState)}, DSR={DescribeRawState(_snapshot.DsrState)}, Pulsador={DescribeButtonState(_snapshot.ButtonState)}.");
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"No se pudo abrir el puerto {_scaleSettings.PortName}: {ex.Message}";
-                _snapshot = CreateDisconnectedSnapshot(errorMessage);
-                _buttonInputLine = null;
-                _lastButtonSignalState = null;
-                _logger.Log(AppLogLevel.Error, "SERVICE", errorMessage);
-            }
+            OpenScalePort();
+            OpenButtonPort();
         }
     }
 
@@ -71,39 +104,26 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
     {
         lock (_sync)
         {
-            if (_serialPort is null)
+            if (!_started && _scalePort is null && _buttonPort is null)
             {
                 return;
             }
 
-            string portName = _scaleSettings.PortName;
+            CloseScalePort();
+            CloseButtonPort();
 
-            try
-            {
-                _serialPort.DataReceived -= OnDataReceived;
-                _serialPort.PinChanged -= OnPinChanged;
+            _started = false;
+            _scaleBuffer.Clear();
+            _buttonBuffer.Clear();
+            _snapshot.IsConnected = false;
+            _snapshot.ButtonIsConnected = false;
+            _snapshot.ButtonStatus = _snapshot.ButtonIsConfigured
+                ? ServiceButtonState.Disconnected
+                : ServiceButtonState.Disabled;
+            _snapshot.UpdatedAt = DateTime.Now;
 
-                if (_serialPort.IsOpen)
-                {
-                    _serialPort.Close();
-                }
-            }
-            finally
-            {
-                _serialPort.Dispose();
-                _serialPort = null;
-                _buttonInputLine = null;
-                _lastButtonSignalState = null;
-                _buffer.Clear();
-
-                _snapshot.IsConnected = false;
-                _snapshot.CtsState = null;
-                _snapshot.DsrState = null;
-                _snapshot.ButtonState = ServiceButtonState.Unknown;
-                _snapshot.UpdatedAt = DateTime.Now;
-
-                _logger.Log(AppLogLevel.Info, "SERVICE", $"Puerto {portName} cerrado.");
-            }
+            _operationSnapshot.ScaleIsConnected = false;
+            _operationSnapshot.UpdatedAt = DateTime.Now;
         }
     }
 
@@ -113,370 +133,689 @@ public sealed class SerialServicePortMonitor : IServicePortMonitor
         {
             return new ServicePortSnapshot
             {
-                RawFrame = _snapshot.RawFrame,
+                ScaleProtocol = _snapshot.ScaleProtocol,
+                ScalePortProfile = _snapshot.ScalePortProfile,
+                ScaleRawChunk = _snapshot.ScaleRawChunk,
+                ScaleLastDecodedFrame = _snapshot.ScaleLastDecodedFrame,
                 RawGrams = _snapshot.RawGrams,
+                RawTareGrams = _snapshot.RawTareGrams,
                 WeightKg = _snapshot.WeightKg,
+                TareKg = _snapshot.TareKg,
                 UpdatedAt = _snapshot.UpdatedAt,
                 IsConnected = _snapshot.IsConnected,
                 LastError = _snapshot.LastError,
-                ConfiguredButtonLine = _snapshot.ConfiguredButtonLine,
-                CtsState = _snapshot.CtsState,
-                DsrState = _snapshot.DsrState,
-                ButtonState = _snapshot.ButtonState,
+                ButtonPortProfile = _snapshot.ButtonPortProfile,
+                ButtonIsConfigured = _snapshot.ButtonIsConfigured,
+                ButtonIsConnected = _snapshot.ButtonIsConnected,
+                ButtonStatus = _snapshot.ButtonStatus,
+                LastButtonRawChunk = _snapshot.LastButtonRawChunk,
+                LastButtonFrame = _snapshot.LastButtonFrame,
+                LastButtonResponse = _snapshot.LastButtonResponse,
                 LastButtonPressedAt = _snapshot.LastButtonPressedAt,
                 ButtonLastError = _snapshot.ButtonLastError
             };
         }
     }
 
-    private ServicePortSnapshot CreateConnectedSnapshot()
+    public WeighingRuntimeSnapshot GetOperationSnapshot()
     {
-        return new ServicePortSnapshot
+        lock (_sync)
         {
-            IsConnected = true,
-            UpdatedAt = DateTime.Now,
-            LastError = null,
-            ConfiguredButtonLine = FormatConfiguredButtonLine(_buttonSettings.InputLine),
-            CtsState = null,
-            DsrState = null,
-            ButtonState = ServiceButtonState.Unknown,
-            LastButtonPressedAt = null,
-            ButtonLastError = null
-        };
+            return new WeighingRuntimeSnapshot
+            {
+                ScaleIsConnected = _operationSnapshot.ScaleIsConnected,
+                CurrentWeightGrams = _operationSnapshot.CurrentWeightGrams,
+                CurrentWeightKg = _operationSnapshot.CurrentWeightKg,
+                UpdatedAt = _operationSnapshot.UpdatedAt,
+                LastCaptureStatus = _operationSnapshot.LastCaptureStatus,
+                LastCaptureMessage = _operationSnapshot.LastCaptureMessage,
+                LastCaptureAt = _operationSnapshot.LastCaptureAt,
+                LastSavedRecord = CloneRecordSummary(_operationSnapshot.LastSavedRecord)
+            };
+        }
     }
 
-    private ServicePortSnapshot CreateDisconnectedSnapshot(string errorMessage)
+    public void RefreshLastSavedRecord()
     {
+        lock (_sync)
+        {
+            LoadLastSavedRecord();
+        }
+    }
+
+    private ServicePortSnapshot CreateInitialSnapshot()
+    {
+        bool buttonConfigured = !string.IsNullOrWhiteSpace(_buttonSettings.PortName);
+        string? scaleProtocolError = BuildUnknownProtocolMessage();
+
         return new ServicePortSnapshot
         {
+            ScaleProtocol = DisplayScaleProtocol(),
+            ScalePortProfile = SerialSettingsHelper.DescribeScaleProfile(_scaleSettings),
+            ScaleRawChunk = string.Empty,
+            ScaleLastDecodedFrame = string.Empty,
+            RawGrams = null,
+            RawTareGrams = null,
+            WeightKg = null,
+            TareKg = null,
+            UpdatedAt = DateTime.Now,
             IsConnected = false,
-            UpdatedAt = DateTime.Now,
-            LastError = errorMessage,
-            ConfiguredButtonLine = FormatConfiguredButtonLine(_buttonSettings.InputLine),
-            CtsState = null,
-            DsrState = null,
-            ButtonState = ServiceButtonState.Unknown,
+            LastError = scaleProtocolError,
+            ButtonPortProfile = SerialSettingsHelper.DescribeButtonProfile(_buttonSettings),
+            ButtonIsConfigured = buttonConfigured,
+            ButtonIsConnected = false,
+            ButtonStatus = buttonConfigured ? ServiceButtonState.Disconnected : ServiceButtonState.Disabled,
+            LastButtonRawChunk = string.Empty,
+            LastButtonFrame = string.Empty,
+            LastButtonResponse = string.Empty,
             LastButtonPressedAt = null,
-            ButtonLastError = errorMessage
+            ButtonLastError = buttonConfigured ? null : "Button.PortName esta vacio. Service abrira sin pulsador."
         };
     }
 
-    private void InitializeButtonMonitoring()
+    private WeighingRuntimeSnapshot CreateInitialOperationSnapshot()
     {
-        _lastButtonSignalState = null;
-
-        if (!TryResolveButtonInputLine(_buttonSettings.InputLine, out ButtonInputLine inputLine))
+        return new WeighingRuntimeSnapshot
         {
-            _buttonInputLine = null;
-            _snapshot.ButtonState = ServiceButtonState.Unknown;
-            _snapshot.ButtonLastError =
-                $"Button.InputLine '{_buttonSettings.InputLine}' no es valido. Valores soportados: Cts, Dsr.";
-            _logger.Log(AppLogLevel.Warning, "BUTTON", _snapshot.ButtonLastError);
+            ScaleIsConnected = false,
+            CurrentWeightGrams = null,
+            CurrentWeightKg = null,
+            UpdatedAt = DateTime.Now,
+            LastCaptureStatus = WeighingCaptureStatus.Idle,
+            LastCaptureMessage = _weighingRepository is null
+                ? "La base local no esta disponible. Las capturas se rechazaran hasta revisar la persistencia."
+                : "Esperando opresion del pulsador.",
+            LastCaptureAt = null,
+            LastSavedRecord = null
+        };
+    }
+
+    private void LoadLastSavedRecord()
+    {
+        _operationSnapshot.LastSavedRecord = null;
+
+        if (_weighingRepository is null)
+        {
             return;
         }
 
-        _buttonInputLine = inputLine;
-
         try
         {
-            bool currentState = ReadButtonState(inputLine);
-            _lastButtonSignalState = currentState;
-            _snapshot.ButtonState = currentState ? ServiceButtonState.Pressed : ServiceButtonState.Released;
-            _snapshot.ButtonLastError = null;
+            WeighingRecord? latestRecord = _weighingRepository.GetLatestAsync().GetAwaiter().GetResult();
+            if (latestRecord is null)
+            {
+                _logger.Log(AppLogLevel.Info, "CAPTURE", "No hay pesadas guardadas en la base local.");
+                return;
+            }
+
+            _operationSnapshot.LastSavedRecord = new WeighingRecordSummary
+            {
+                Id = latestRecord.Id,
+                Timestamp = latestRecord.Timestamp,
+                WeightKg = latestRecord.WeightKg
+            };
+
+            _logger.Log(AppLogLevel.Info, "CAPTURE", $"Ultima pesada cargada desde base local. Id={latestRecord.Id}, Kg={latestRecord.WeightKg:F2}.");
         }
         catch (Exception ex)
         {
-            _buttonInputLine = null;
-            _snapshot.ButtonState = ServiceButtonState.Unknown;
-            _snapshot.ButtonLastError = $"No se pudo leer el estado inicial del pulsador: {ex.Message}";
-            _logger.Log(AppLogLevel.Error, "BUTTON", _snapshot.ButtonLastError);
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", $"No se pudo leer la ultima pesada guardada: {ex.Message}");
         }
     }
 
-    private SerialPort BuildSerialPort()
+    private void OpenScalePort()
     {
-        Parity parity = Enum.Parse<Parity>(_scaleSettings.Parity, ignoreCase: true);
-        StopBits stopBits = Enum.Parse<StopBits>(_scaleSettings.StopBits, ignoreCase: true);
+        if (string.IsNullOrWhiteSpace(_scaleSettings.PortName))
+        {
+            RegisterScalePortError("Scale.PortName esta vacio.");
+            return;
+        }
+
+        try
+        {
+            SerialPort serialPort = BuildScaleSerialPort();
+            serialPort.DataReceived += OnScaleDataReceived;
+            serialPort.Open();
+
+            _scalePort = serialPort;
+            _snapshot.IsConnected = true;
+            _snapshot.UpdatedAt = DateTime.Now;
+            _operationSnapshot.ScaleIsConnected = true;
+            _operationSnapshot.UpdatedAt = DateTime.Now;
+
+            if (_scaleProtocol is not null)
+            {
+                _snapshot.LastError = null;
+            }
+
+            _logger.Log(
+                AppLogLevel.Info,
+                "SCALE",
+                $"Puerto {_scaleSettings.PortName} abierto. Protocolo={DisplayScaleProtocol()}, Perfil={_snapshot.ScalePortProfile}.");
+
+            if (_scaleProtocol is null)
+            {
+                string warning = BuildUnknownProtocolMessage()!;
+                _snapshot.LastError = warning;
+                _logger.Log(AppLogLevel.Warning, "SCALE", warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            RegisterScalePortError($"No se pudo abrir el puerto {_scaleSettings.PortName}: {ex.Message}");
+        }
+    }
+
+    private void OpenButtonPort()
+    {
+        if (!_snapshot.ButtonIsConfigured)
+        {
+            _logger.Log(AppLogLevel.Info, "BUTTON", _snapshot.ButtonLastError ?? "Pulsador deshabilitado.");
+            return;
+        }
+
+        if (string.Equals(_buttonSettings.PortName, _scaleSettings.PortName, StringComparison.OrdinalIgnoreCase))
+        {
+            RegisterButtonError("Button.PortName no puede coincidir con Scale.PortName.");
+            return;
+        }
+
+        try
+        {
+            SerialPort serialPort = BuildButtonSerialPort();
+            serialPort.DataReceived += OnButtonDataReceived;
+            serialPort.Open();
+
+            _buttonPort = serialPort;
+            _snapshot.ButtonIsConnected = true;
+            _snapshot.ButtonStatus = ServiceButtonState.Listening;
+            _snapshot.ButtonLastError = null;
+            _snapshot.UpdatedAt = DateTime.Now;
+
+            _logger.Log(
+                AppLogLevel.Info,
+                "BUTTON",
+                $"Puerto {_buttonSettings.PortName} abierto. Perfil={_snapshot.ButtonPortProfile}. Esperando $P1!.");
+        }
+        catch (Exception ex)
+        {
+            RegisterButtonError($"No se pudo abrir el puerto {_buttonSettings.PortName}: {ex.Message}");
+        }
+    }
+
+    private void CloseScalePort()
+    {
+        if (_scalePort is null)
+        {
+            return;
+        }
+
+        string portName = _scaleSettings.PortName;
+
+        try
+        {
+            _scalePort.DataReceived -= OnScaleDataReceived;
+
+            if (_scalePort.IsOpen)
+            {
+                _scalePort.Close();
+            }
+        }
+        finally
+        {
+            _scalePort.Dispose();
+            _scalePort = null;
+            _logger.Log(AppLogLevel.Info, "SCALE", $"Puerto {portName} cerrado.");
+        }
+    }
+
+    private void CloseButtonPort()
+    {
+        if (_buttonPort is null)
+        {
+            return;
+        }
+
+        string portName = _buttonSettings.PortName;
+
+        try
+        {
+            _buttonPort.DataReceived -= OnButtonDataReceived;
+
+            if (_buttonPort.IsOpen)
+            {
+                _buttonPort.Close();
+            }
+        }
+        finally
+        {
+            _buttonPort.Dispose();
+            _buttonPort = null;
+            _logger.Log(AppLogLevel.Info, "BUTTON", $"Puerto {portName} cerrado.");
+        }
+    }
+
+    private SerialPort BuildScaleSerialPort()
+    {
+        Parity parity = SerialSettingsHelper.ParseParity(_scaleSettings.Parity, "Scale.Parity");
+        StopBits stopBits = SerialSettingsHelper.ParseStopBits(_scaleSettings.StopBits, "Scale.StopBits");
+        Handshake handshake = SerialSettingsHelper.ParseHandshake(_scaleSettings.Handshake, "Scale.Handshake");
 
         return new SerialPort(_scaleSettings.PortName, _scaleSettings.BaudRate, parity, _scaleSettings.DataBits, stopBits)
         {
             Encoding = Encoding.ASCII,
-            Handshake = Handshake.None,
-            NewLine = NormalizeNewLine(_scaleSettings.NewLine),
+            Handshake = handshake,
+            NewLine = SerialSettingsHelper.NormalizeNewLine(_scaleSettings.NewLine),
             DtrEnable = false,
             RtsEnable = false
         };
     }
 
-    private static string NormalizeNewLine(string newLine)
+    private SerialPort BuildButtonSerialPort()
     {
-        if (string.IsNullOrEmpty(newLine))
-        {
-            return "\n";
-        }
+        Parity parity = SerialSettingsHelper.ParseParity(_buttonSettings.Parity, "Button.Parity");
+        StopBits stopBits = SerialSettingsHelper.ParseStopBits(_buttonSettings.StopBits, "Button.StopBits");
+        Handshake handshake = SerialSettingsHelper.ParseHandshake(_buttonSettings.Handshake, "Button.Handshake");
 
-        return newLine
-            .Replace("\\r", "\r", StringComparison.Ordinal)
-            .Replace("\\n", "\n", StringComparison.Ordinal);
+        return new SerialPort(_buttonSettings.PortName, _buttonSettings.BaudRate, parity, _buttonSettings.DataBits, stopBits)
+        {
+            Encoding = Encoding.ASCII,
+            Handshake = handshake,
+            DtrEnable = false,
+            RtsEnable = false
+        };
     }
 
-    private void OnDataReceived(object sender, SerialDataReceivedEventArgs e)
+    private void OnScaleDataReceived(object? sender, SerialDataReceivedEventArgs e)
     {
         lock (_sync)
         {
-            if (_serialPort is null)
+            if (_scalePort is null)
             {
                 return;
             }
 
             try
             {
-                string chunk = _serialPort.ReadExisting();
-                if (string.IsNullOrEmpty(chunk))
+                int bytesToRead = _scalePort.BytesToRead;
+                if (bytesToRead <= 0)
                 {
                     return;
                 }
 
-                _buffer.Append(chunk);
-                ProcessBufferLines();
+                byte[] chunk = new byte[bytesToRead];
+                int bytesRead = _scalePort.Read(chunk, 0, chunk.Length);
+                if (bytesRead <= 0)
+                {
+                    return;
+                }
+
+                string rawChunk = ByteFrameFormatter.FormatChunk(chunk, bytesRead);
+                _snapshot.ScaleRawChunk = rawChunk;
+                _snapshot.UpdatedAt = DateTime.Now;
+                _snapshot.IsConnected = true;
+                _operationSnapshot.ScaleIsConnected = true;
+                _operationSnapshot.UpdatedAt = DateTime.Now;
+
+                _logger.Log(
+                    AppLogLevel.Info,
+                    "SCALE",
+                    $"Chunk RX. Bytes={bytesRead}, Protocolo={DisplayScaleProtocol()}, {rawChunk}");
+
+                if (_scaleProtocol is null)
+                {
+                    _snapshot.LastError = BuildUnknownProtocolMessage();
+                    return;
+                }
+
+                AppendBytes(_scaleBuffer, chunk, bytesRead);
+                ProcessScaleFrames();
             }
             catch (Exception ex)
             {
-                RegisterPortError($"Error de lectura serial: {ex.Message}");
+                RegisterScalePortError($"Error de lectura serial en balanza: {ex.Message}");
             }
         }
     }
 
-    private void OnPinChanged(object sender, SerialPinChangedEventArgs e)
+    private void OnButtonDataReceived(object? sender, SerialDataReceivedEventArgs e)
     {
         lock (_sync)
         {
-            if (_serialPort is null || !IsTrackedPinChange(e.EventType))
+            if (_buttonPort is null)
             {
                 return;
             }
 
             try
             {
-                RefreshControlLineStates();
+                int bytesToRead = _buttonPort.BytesToRead;
+                if (bytesToRead <= 0)
+                {
+                    return;
+                }
+
+                byte[] chunk = new byte[bytesToRead];
+                int bytesRead = _buttonPort.Read(chunk, 0, chunk.Length);
+                if (bytesRead <= 0)
+                {
+                    return;
+                }
+
+                string rawChunk = ByteFrameFormatter.FormatChunk(chunk, bytesRead);
+                _snapshot.LastButtonRawChunk = rawChunk;
                 _snapshot.UpdatedAt = DateTime.Now;
+                _snapshot.ButtonIsConnected = true;
 
                 _logger.Log(
                     AppLogLevel.Info,
                     "BUTTON",
-                    $"Cambio de lineas detectado. Evento={e.EventType}, CTS={DescribeRawState(_snapshot.CtsState)}, DSR={DescribeRawState(_snapshot.DsrState)}.");
+                    $"Chunk RX. Bytes={bytesRead}, {rawChunk}");
 
-                if (_buttonInputLine is null || !IsRelevantPinChange(e.EventType, _buttonInputLine.Value))
-                {
-                    return;
-                }
-
-                bool currentState = ReadButtonState(_buttonInputLine.Value);
-                bool stateChanged = _lastButtonSignalState != currentState;
-                bool isNewPress = currentState && _lastButtonSignalState == false;
-
-                _snapshot.ButtonState = currentState ? ServiceButtonState.Pressed : ServiceButtonState.Released;
-                _snapshot.ButtonLastError = null;
-                _lastButtonSignalState = currentState;
-
-                if (isNewPress)
-                {
-                    _snapshot.LastButtonPressedAt = DateTime.Now;
-                    _logger.Log(
-                        AppLogLevel.Info,
-                        "BUTTON",
-                        $"Opresion detectada. Linea={DescribeInputLine(_buttonInputLine.Value)}, CTS={DescribeRawState(_snapshot.CtsState)}, DSR={DescribeRawState(_snapshot.DsrState)}.");
-                }
-                else if (stateChanged)
-                {
-                    _logger.Log(
-                        AppLogLevel.Info,
-                        "BUTTON",
-                        $"Estado logico del pulsador={DescribeButtonState(_snapshot.ButtonState)}. Linea={DescribeInputLine(_buttonInputLine.Value)}.");
-                }
+                AppendBytes(_buttonBuffer, chunk, bytesRead);
+                ProcessButtonFrames();
             }
             catch (Exception ex)
             {
-                _snapshot.ButtonState = ServiceButtonState.Unknown;
-                _snapshot.ButtonLastError = $"Error leyendo el pulsador: {ex.Message}";
-                _snapshot.UpdatedAt = DateTime.Now;
-                _lastButtonSignalState = null;
-                _logger.Log(AppLogLevel.Error, "BUTTON", _snapshot.ButtonLastError);
+                RegisterButtonError($"Error de lectura serial en pulsador: {ex.Message}");
             }
         }
     }
 
-    private void ProcessBufferLines()
+    private void ProcessScaleFrames()
     {
-        while (TryReadLine(_buffer, out string line))
+        if (_scaleProtocol is null)
         {
-            int? grams = TryExtractFirstInteger(line);
-            decimal? kilograms = grams.HasValue ? WeightConversionHelper.GramsToKg(grams.Value) : null;
-
-            _snapshot.RawFrame = line;
-            _snapshot.RawGrams = grams;
-            _snapshot.WeightKg = kilograms;
-            _snapshot.UpdatedAt = DateTime.Now;
-            _snapshot.IsConnected = true;
-            _snapshot.LastError = grams.HasValue ? null : "No se detecto valor numerico en la trama.";
-
-            if (grams.HasValue && kilograms.HasValue)
-            {
-                _logger.Log(
-                    AppLogLevel.Info,
-                    "SCALE",
-                    $"Trama=\"{SanitizeFrameForLog(line)}\", Gramos={grams.Value}, Kg={kilograms.Value:F3}.");
-            }
-            else
-            {
-                _logger.Log(
-                    AppLogLevel.Warning,
-                    "SCALE",
-                    $"Trama=\"{SanitizeFrameForLog(line)}\" sin valor numerico valido.");
-            }
-        }
-    }
-
-    private void RegisterPortError(string errorMessage)
-    {
-        _snapshot.IsConnected = false;
-        _snapshot.LastError = errorMessage;
-        _snapshot.CtsState = null;
-        _snapshot.DsrState = null;
-        _snapshot.ButtonState = ServiceButtonState.Unknown;
-        _snapshot.ButtonLastError = errorMessage;
-        _snapshot.UpdatedAt = DateTime.Now;
-        _lastButtonSignalState = null;
-
-        _logger.Log(AppLogLevel.Error, "SERVICE", errorMessage);
-    }
-
-    private void RefreshControlLineStates()
-    {
-        if (_serialPort is null || !_serialPort.IsOpen)
-        {
-            _snapshot.CtsState = null;
-            _snapshot.DsrState = null;
             return;
         }
 
-        _snapshot.CtsState = _serialPort.CtsHolding;
-        _snapshot.DsrState = _serialPort.DsrHolding;
-    }
-
-    private bool ReadButtonState(ButtonInputLine inputLine)
-    {
-        return inputLine switch
+        while (true)
         {
-            ButtonInputLine.Cts => _snapshot.CtsState
-                ?? throw new InvalidOperationException("No se pudo leer CTS."),
-            ButtonInputLine.Dsr => _snapshot.DsrState
-                ?? throw new InvalidOperationException("No se pudo leer DSR."),
-            _ => throw new InvalidOperationException("La linea del pulsador no es compatible.")
-        };
+            ScaleFrameReadResult result = _scaleProtocol.TryReadFrame(_scaleBuffer, _scaleSettings);
+
+            switch (result.Status)
+            {
+                case ScaleFrameReadStatus.NeedMoreData:
+                    return;
+
+                case ScaleFrameReadStatus.InvalidFrame:
+                    RegisterScaleFrameWarning(result.ErrorMessage ?? "Se recibio una trama invalida.");
+                    continue;
+
+                case ScaleFrameReadStatus.FrameDecoded:
+                    ApplyScaleFrame(result.Frame!);
+                    continue;
+
+                default:
+                    return;
+            }
+        }
     }
 
-    private static bool IsTrackedPinChange(SerialPinChange eventType)
+    private void ProcessButtonFrames()
     {
-        return eventType is SerialPinChange.CtsChanged or SerialPinChange.DsrChanged;
-    }
-
-    private static bool IsRelevantPinChange(SerialPinChange eventType, ButtonInputLine inputLine)
-    {
-        return inputLine switch
+        while (true)
         {
-            ButtonInputLine.Cts => eventType == SerialPinChange.CtsChanged,
-            ButtonInputLine.Dsr => eventType == SerialPinChange.DsrChanged,
-            _ => false
-        };
+            int frameIndex = ByteSequenceHelper.FindSequence(_buttonBuffer, ButtonRequestBytes);
+            if (frameIndex < 0)
+            {
+                ByteSequenceHelper.TrimBufferToPartialMatch(_buttonBuffer, ButtonRequestBytes);
+                return;
+            }
+
+            if (frameIndex > 0)
+            {
+                _buttonBuffer.RemoveRange(0, frameIndex);
+                _logger.Log(AppLogLevel.Warning, "BUTTON", $"Se descartaron {frameIndex} bytes previos a $P1!.");
+            }
+
+            if (_buttonBuffer.Count < ButtonRequestBytes.Length)
+            {
+                return;
+            }
+
+            _buttonBuffer.RemoveRange(0, ButtonRequestBytes.Length);
+            HandleButtonRequestReceived();
+        }
     }
 
-    private static bool TryResolveButtonInputLine(string? configuredValue, out ButtonInputLine inputLine)
+    private void HandleButtonRequestReceived()
     {
-        if (Enum.TryParse(configuredValue, ignoreCase: true, out inputLine))
+        DateTime pressedAt = DateTime.Now;
+
+        _snapshot.ButtonStatus = ServiceButtonState.Listening;
+        _snapshot.LastButtonFrame = "$P1!";
+        _snapshot.LastButtonPressedAt = pressedAt;
+        _snapshot.ButtonLastError = null;
+        _snapshot.UpdatedAt = pressedAt;
+
+        _logger.Log(AppLogLevel.Info, "BUTTON", "BUTTON RX $P1!.");
+
+        ProcessCaptureForButtonPress(pressedAt);
+
+        try
         {
-            return inputLine is ButtonInputLine.Cts or ButtonInputLine.Dsr;
+            if (_buttonPort is null || !_buttonPort.IsOpen)
+            {
+                throw new InvalidOperationException("El puerto del pulsador no esta abierto.");
+            }
+
+            _buttonPort.Write(ButtonResponseBytes, 0, ButtonResponseBytes.Length);
+            _snapshot.LastButtonResponse = "$B1!";
+            _snapshot.ButtonStatus = ServiceButtonState.Listening;
+            _snapshot.ButtonLastError = null;
+            _snapshot.UpdatedAt = DateTime.Now;
+
+            _logger.Log(AppLogLevel.Info, "BUTTON", "BUTTON TX $B1!.");
+        }
+        catch (Exception ex)
+        {
+            RegisterButtonError($"Error enviando $B1! al pulsador: {ex.Message}");
+        }
+    }
+
+    private void ProcessCaptureForButtonPress(DateTime pressedAt)
+    {
+        _operationSnapshot.LastCaptureAt = pressedAt;
+        _operationSnapshot.UpdatedAt = pressedAt;
+
+        if (!_snapshot.RawGrams.HasValue || !_snapshot.WeightKg.HasValue)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.RejectedNoWeight,
+                "Pesada rechazada. No hay un peso valido disponible para guardar.");
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
         }
 
-        inputLine = default;
-        return false;
-    }
+        decimal currentWeightKg = _snapshot.WeightKg.Value;
+        decimal minKg = Math.Min(_thresholdSettings.MinKg, _thresholdSettings.MaxKg);
+        decimal maxKg = Math.Max(_thresholdSettings.MinKg, _thresholdSettings.MaxKg);
 
-    private static string FormatConfiguredButtonLine(string? configuredValue)
-    {
-        return string.IsNullOrWhiteSpace(configuredValue)
-            ? "--"
-            : configuredValue.Trim().ToUpperInvariant();
-    }
-
-    private static string DescribeInputLine(ButtonInputLine inputLine)
-    {
-        return inputLine switch
+        if (currentWeightKg < minKg || currentWeightKg > maxKg)
         {
-            ButtonInputLine.Cts => "CTS",
-            ButtonInputLine.Dsr => "DSR",
-            _ => inputLine.ToString().ToUpperInvariant()
-        };
-    }
-
-    private static string DescribeRawState(bool? state)
-    {
-        return state switch
-        {
-            true => "Activa",
-            false => "Inactiva",
-            null => "Sin lectura"
-        };
-    }
-
-    private static string DescribeButtonState(ServiceButtonState buttonState)
-    {
-        return buttonState switch
-        {
-            ServiceButtonState.Pressed => "Presionado",
-            ServiceButtonState.Released => "No presionado",
-            _ => "Sin lectura"
-        };
-    }
-
-    private static string SanitizeFrameForLog(string frame)
-    {
-        return frame
-            .Replace("\r", "\\r", StringComparison.Ordinal)
-            .Replace("\n", "\\n", StringComparison.Ordinal);
-    }
-
-    private static bool TryReadLine(StringBuilder buffer, out string line)
-    {
-        string content = buffer.ToString();
-        int lineBreakIndex = content.IndexOf('\n');
-        if (lineBreakIndex < 0)
-        {
-            line = string.Empty;
-            return false;
+            ApplyCaptureResult(
+                WeighingCaptureStatus.RejectedOutOfRange,
+                $"Pesada rechazada. El peso {currentWeightKg:F2} kg esta fuera del rango permitido ({minKg:F2} a {maxKg:F2} kg).");
+            _logger.Log(AppLogLevel.Warning, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
         }
 
-        string rawLine = content[..lineBreakIndex].TrimEnd('\r');
-        buffer.Remove(0, lineBreakIndex + 1);
-        line = rawLine;
-        return true;
+        if (_weighingRepository is null)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.SaveError,
+                "Pesada rechazada. La base local no esta disponible.");
+            _logger.Log(AppLogLevel.Error, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+            return;
+        }
+
+        try
+        {
+            var record = new WeighingRecord
+            {
+                Timestamp = pressedAt,
+                WeightKg = currentWeightKg,
+                RawGrams = _snapshot.RawGrams,
+                RawFrame = SelectFrameForPersistence(),
+                IsEditedToZero = false,
+                EditedAt = null
+            };
+
+            long recordId = _weighingRepository.SaveAsync(record).GetAwaiter().GetResult();
+
+            _operationSnapshot.LastCaptureStatus = WeighingCaptureStatus.Saved;
+            _operationSnapshot.LastCaptureMessage = $"Pesada guardada. Nro={recordId}, Kg={currentWeightKg:F2}.";
+            _operationSnapshot.LastSavedRecord = new WeighingRecordSummary
+            {
+                Id = recordId,
+                Timestamp = pressedAt,
+                WeightKg = currentWeightKg
+            };
+            _operationSnapshot.UpdatedAt = DateTime.Now;
+
+            _logger.Log(AppLogLevel.Info, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+        }
+        catch (Exception ex)
+        {
+            ApplyCaptureResult(
+                WeighingCaptureStatus.SaveError,
+                $"Pesada rechazada. No se pudo guardar en base local: {ex.Message}");
+            _logger.Log(AppLogLevel.Error, "CAPTURE", _operationSnapshot.LastCaptureMessage);
+        }
     }
 
-    private static int? TryExtractFirstInteger(string frame)
+    private void ApplyCaptureResult(WeighingCaptureStatus status, string message)
     {
-        if (string.IsNullOrWhiteSpace(frame))
+        _operationSnapshot.LastCaptureStatus = status;
+        _operationSnapshot.LastCaptureMessage = message;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
+    }
+
+    private string SelectFrameForPersistence()
+    {
+        if (!string.IsNullOrWhiteSpace(_snapshot.ScaleLastDecodedFrame))
+        {
+            return _snapshot.ScaleLastDecodedFrame;
+        }
+
+        return _snapshot.ScaleRawChunk;
+    }
+
+    private void ApplyScaleFrame(ScaleDecodedFrame frame)
+    {
+        decimal? kilograms = frame.WeightGrams.HasValue
+            ? WeightConversionHelper.RawValueToKg(frame.WeightGrams.Value, _weightDecimalDigits)
+            : null;
+        decimal? tareKg = frame.TareGrams.HasValue
+            ? WeightConversionHelper.RawValueToKg(frame.TareGrams.Value, _tareDecimalDigits)
+            : null;
+
+        _snapshot.ScaleLastDecodedFrame = frame.DisplayFrame;
+        _snapshot.RawGrams = frame.WeightGrams;
+        _snapshot.RawTareGrams = frame.TareGrams;
+        _snapshot.WeightKg = kilograms;
+        _snapshot.TareKg = tareKg;
+        _snapshot.IsConnected = true;
+        _snapshot.LastError = null;
+        _snapshot.UpdatedAt = DateTime.Now;
+
+        _operationSnapshot.ScaleIsConnected = true;
+        _operationSnapshot.CurrentWeightGrams = frame.WeightGrams;
+        _operationSnapshot.CurrentWeightKg = kilograms;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
+
+        string tareSegment = frame.TareGrams.HasValue && tareKg.HasValue
+            ? $", TaraRaw={frame.TareGrams.Value}, TaraKg={tareKg.Value:F3}, DecimalesTara={_tareDecimalDigits}"
+            : string.Empty;
+        string weightSegment = frame.WeightGrams.HasValue && kilograms.HasValue
+            ? $"ValorRaw={frame.WeightGrams.Value}, Kg={kilograms.Value:F3}, DecimalesPeso={_weightDecimalDigits}"
+            : "Sin peso numerico";
+
+        _logger.Log(
+            AppLogLevel.Info,
+            "SCALE",
+            $"Trama interpretada. Protocolo={DisplayScaleProtocol()}, {weightSegment}{tareSegment}, Decodificada=\"{frame.DisplayFrame}\".");
+    }
+
+    private void RegisterScaleFrameWarning(string message)
+    {
+        _snapshot.IsConnected = true;
+        _snapshot.LastError = $"Protocolo {DisplayScaleProtocol()}: {message}";
+        _snapshot.UpdatedAt = DateTime.Now;
+        _logger.Log(AppLogLevel.Warning, "SCALE", _snapshot.LastError);
+    }
+
+    private void RegisterScalePortError(string errorMessage)
+    {
+        _snapshot.IsConnected = false;
+        _snapshot.LastError = errorMessage;
+        _snapshot.UpdatedAt = DateTime.Now;
+        _scaleBuffer.Clear();
+
+        _operationSnapshot.ScaleIsConnected = false;
+        _operationSnapshot.UpdatedAt = DateTime.Now;
+
+        _logger.Log(AppLogLevel.Error, "SCALE", errorMessage);
+    }
+
+    private void RegisterButtonError(string errorMessage)
+    {
+        _snapshot.ButtonIsConnected = false;
+        _snapshot.ButtonStatus = _snapshot.ButtonIsConfigured ? ServiceButtonState.Error : ServiceButtonState.Disabled;
+        _snapshot.ButtonLastError = errorMessage;
+        _snapshot.UpdatedAt = DateTime.Now;
+        _buttonBuffer.Clear();
+
+        _logger.Log(AppLogLevel.Error, "BUTTON", errorMessage);
+    }
+
+    private string DisplayScaleProtocol()
+    {
+        return string.IsNullOrWhiteSpace(_configuredScaleProtocol) ? "--" : _configuredScaleProtocol;
+    }
+
+    private string? BuildUnknownProtocolMessage()
+    {
+        if (_scaleProtocol is not null)
         {
             return null;
         }
 
-        foreach (string token in frame.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        if (string.IsNullOrWhiteSpace(_configuredScaleProtocol))
         {
-            if (int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
-            {
-                return value;
-            }
+            return $"Scale.Protocol esta vacio. Se mostrara solo recepcion cruda. Protocolos soportados: {ScaleProtocolCatalog.DescribeSupportedValues()}.";
         }
 
-        return null;
+        return $"Scale.Protocol '{_configuredScaleProtocol}' no es soportado. Se mostrara solo recepcion cruda. Protocolos soportados: {ScaleProtocolCatalog.DescribeSupportedValues()}.";
+    }
+
+    private static WeighingRecordSummary? CloneRecordSummary(WeighingRecordSummary? source)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        return new WeighingRecordSummary
+        {
+            Id = source.Id,
+            Timestamp = source.Timestamp,
+            WeightKg = source.WeightKg
+        };
+    }
+
+    private static void AppendBytes(List<byte> buffer, byte[] chunk, int count)
+    {
+        for (int index = 0; index < count; index++)
+        {
+            buffer.Add(chunk[index]);
+        }
+
+        const int maxBufferedBytes = 4096;
+        if (buffer.Count > maxBufferedBytes)
+        {
+            buffer.RemoveRange(0, buffer.Count - maxBufferedBytes);
+        }
     }
 }

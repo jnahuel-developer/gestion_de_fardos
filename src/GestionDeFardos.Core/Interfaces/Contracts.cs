@@ -10,6 +10,12 @@ public interface IServicePortMonitor
     ServicePortSnapshot GetSnapshot();
 }
 
+public interface IWeighingRuntime : IServicePortMonitor
+{
+    WeighingRuntimeSnapshot GetOperationSnapshot();
+    void RefreshLastSavedRecord();
+}
+
 public interface IAppLogger
 {
     void Log(AppLogLevel level, string category, string message);
@@ -24,7 +30,16 @@ public enum AppLogLevel
 
 public interface IWeighingRepository
 {
-    Task SaveAsync(WeighingRecord record, CancellationToken cancellationToken = default);
+    Task InitializeAsync(CancellationToken cancellationToken = default);
+    Task<long> SaveAsync(WeighingRecord record, CancellationToken cancellationToken = default);
+    Task<WeighingRecord?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
+    Task<WeighingRecord?> GetLatestAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WeighingRecord>> ListByDateRangeAsync(
+        DateTime fromInclusive,
+        DateTime toInclusive,
+        CancellationToken cancellationToken = default);
+    Task<bool> SetWeightToZeroAsync(long id, DateTime editedAt, CancellationToken cancellationToken = default);
+    Task<int> DeleteUpToAsync(DateTime toInclusive, CancellationToken cancellationToken = default);
 }
 
 public interface IReportExporter

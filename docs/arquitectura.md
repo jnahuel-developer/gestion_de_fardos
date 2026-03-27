@@ -1,51 +1,121 @@
-# Arquitectura base
+# Arquitectura
 
 ## Capas
 
-- **GestionDeFardos.App**: interfaz WinForms, composicion de la aplicacion y acceso al modo Service.
-- **GestionDeFardos.Core**: modelos, contratos y reglas puras.
-- **GestionDeFardos.Infrastructure**: configuracion, puerto serial, logging a archivo y packaging tecnico.
+- `GestionDeFardos.App`
+  - WinForms
+  - pantalla principal
+  - Modo Service
+  - popups de edicion y exportacion
+- `GestionDeFardos.Core`
+  - configuracion
+  - contratos
+  - modelos
+  - utilidades puras
+- `GestionDeFardos.Infrastructure`
+  - configuracion
+  - logging a archivo
+  - monitoreo serial
+  - persistencia SQLite
+  - exportacion Excel
 
-## Ubicaciones de archivos
+## Runtime compartido
 
-- Configuracion: `AppContext.BaseDirectory/config.json`.
-- Logs: `AppContext.BaseDirectory/logs`.
-- Artefactos de release: `artifacts/`.
+- La app crea un unico `IWeighingRuntime` al iniciar.
+- `MainForm` y `ServiceForm` consumen el mismo runtime.
+- Service no abre puertos por su cuenta.
+- La implementacion actual es `SerialServicePortMonitor`.
 
-## Acceso a Modo Service
+## Canales seriales
 
-- El acceso se inicia desde `MainForm` mediante `WM_HOTKEY`.
-- Se registran dos combinaciones:
-  - `Ctrl+Shift+S`
-  - `Ctrl+Alt+Shift+S`
-- Al detectar la hotkey se solicita contrasena y, si es correcta, se abre `ServiceForm`.
-- Si `ServiceForm` ya esta abierta, no se crea una nueva instancia; se trae al frente.
+### Balanza
 
-## Monitoreo serial compartido en Service
+- Puerto propio.
+- Interpretacion por protocolo configurable.
+- Posicion decimal configurable para peso y tara desde `Scale`.
+- Protocolos soportados:
+  - `w180-t`
+  - `simple-ascii`
 
-- `ServiceForm` inicia un `IServicePortMonitor` al mostrarse y lo detiene al cerrarse.
-- La implementacion actual es `SerialServicePortMonitor`, basada en un unico `SerialPort`.
-- La balanza se lee por `DataReceived`, acumulando texto ASCII hasta linea completa y extrayendo el primer entero en gramos.
-- El pulsador se detecta por `PinChanged`, evaluando la linea configurada (`CTS` o `DSR`) y detectando solo el flanco ascendente como opresion.
-- El snapshot expone peso convertido, ultima trama ASCII, conexion, error, linea configurada, estado crudo de `CTS/DSR`, estado logico del pulsador y ultima opresion.
+### Pulsador
 
-## Logging basico
+- Puerto propio.
+- La app escucha `$P1!`.
+- La app responde `$B1!`.
 
-- El contrato comun es `IAppLogger`.
-- La implementacion actual es `FileAppLogger`.
-- Los eventos se persisten en `./logs/gestion-de-fardos-YYYYMMDD.log`.
-- Se registran inicio/cierre de app, eventos de Service, apertura/cierre de puerto, tramas de balanza, cambios de lineas de control y errores.
+## Persistencia local
 
-## Configuracion serial relevante
+- Base SQLite local.
+- Ruta definida por `Database.FilePath`.
+- Bootstrap automatico al iniciar la app.
+- Implementacion actual: `SqliteWeighingRepository`.
 
-- `Scale.PortName`, `Scale.BaudRate`, `Scale.Parity`, `Scale.DataBits`, `Scale.StopBits`, `Scale.NewLine`.
-- `Button.InputLine` define la linea de entrada observada por la app (`Cts` o `Dsr`).
-- Para pruebas con el simulador:
-  - `--button-line rts` implica `Button.InputLine = Cts`.
-  - `--button-line dtr` implica `Button.InputLine = Dsr`.
+## Modelo de pesada
 
-## Release e instalador
+`WeighingRecord` persiste:
 
-- La publicacion de entrega se genera self-contained `win-x64`.
-- El instalador se arma con Inno Setup a partir de la carpeta publicada.
-- La ruta por defecto es `C:\GestionDeFardos`, fuera de `Program Files`, para permitir `config.json` y `logs` junto al ejecutable.
+- `Id`
+- `Timestamp`
+- `WeightKg`
+- `RawGrams`
+- `RawFrame`
+- `IsEditedToZero`
+- `EditedAt`
+
+## Flujo de captura
+
+1. La balanza actualiza el ultimo peso valido.
+2. El pulsador envia `$P1!`.
+3. La app responde `$B1!`.
+4. El runtime valida thresholds.
+5. Si el peso es valido, lo guarda en SQLite.
+6. Si no es valido, informa rechazo sin insertar.
+
+## Edicion
+
+- La pantalla principal permite seleccionar una pesada por numero.
+- Se valida `Passwords.Edit`.
+- El peso se actualiza a `0`.
+- El registro se conserva para auditoria minima.
+
+## Exportacion
+
+- La pantalla principal pide un rango de fechas.
+- Consulta registros en SQLite.
+- Genera `.xlsx` con `ClosedXML`.
+- La implementacion actual es `ClosedXmlReportExporter`.
+
+## Modo Service
+
+Service expone:
+
+- snapshot tecnico de balanza
+- snapshot tecnico de pulsador
+- chunk raw
+- trama interpretada
+- diagnosticos
+- borrado historico por fecha
+
+El borrado historico:
+
+- usa doble confirmacion
+- elimina registros hasta una fecha inclusive
+- refresca el ultimo registro del runtime
+
+## Logging
+
+- Implementacion actual: `FileAppLogger`
+- Destino: `./logs`
+- Archivo: `gestion-de-fardos-YYYYMMDD.log`
+
+Se registran:
+
+- inicio y cierre
+- apertura y cierre de puertos
+- recepcion raw
+- interpretacion de balanza
+- eventos del pulsador
+- guardados
+- ediciones
+- exportaciones
+- borrados

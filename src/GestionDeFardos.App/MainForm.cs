@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using GestionDeFardos.Core.Config;
 using GestionDeFardos.Core.Interfaces;
+using GestionDeFardos.Core.Models;
 using GestionDeFardos.Infrastructure;
 using GestionDeFardos.Infrastructure.Config;
 
@@ -17,10 +18,32 @@ public sealed class MainForm : Form
     private const int HotkeyIdCtrlShiftS = 1001;
     private const int HotkeyIdCtrlAltShiftS = 1002;
 
+    private static readonly Color PageBackgroundColor = Color.FromArgb(242, 244, 247);
+    private static readonly Color CardColor = Color.White;
+    private static readonly Color AccentColor = Color.FromArgb(0, 102, 68);
+    private static readonly Color WarningColor = Color.FromArgb(176, 74, 0);
+    private static readonly Color ErrorColor = Color.FromArgb(166, 31, 45);
+    private static readonly Color MutedColor = Color.FromArgb(94, 102, 112);
+
     private readonly IAppLogger _logger;
     private readonly AppSettings _settings;
     private readonly string _configPath;
     private readonly bool _configFileExists;
+    private readonly bool _configLoadedSuccessfully;
+    private readonly IWeighingRepository? _weighingRepository;
+    private readonly IWeighingRuntime _weighingRuntime;
+    private readonly IReportExporter _reportExporter;
+    private readonly Label _scaleConnectionLabel;
+    private readonly Label _weightUpdatedAtLabel;
+    private readonly Label _currentWeightValueLabel;
+    private readonly Label _captureStatusLabel;
+    private readonly Label _captureMessageLabel;
+    private readonly Label _lastCaptureAtLabel;
+    private readonly Label _lastRecordLabel;
+    private readonly Button _editRecordButton;
+    private readonly Button _exportButton;
+    private readonly System.Windows.Forms.Timer _refreshTimer;
+    private bool _exportInProgress;
     private ServiceForm? _serviceForm;
 
     public MainForm(IAppLogger logger)
@@ -28,45 +51,198 @@ public sealed class MainForm : Form
         _logger = logger;
         _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
         _configFileExists = File.Exists(_configPath);
-        _settings = LoadAppSettings();
+        (_settings, _configLoadedSuccessfully) = LoadAppSettings();
+        _weighingRepository = EnsureDatabaseReady();
+        _weighingRuntime = new SerialServicePortMonitor(_settings.Scale, _settings.Button, _settings.Thresholds, _weighingRepository, _logger);
+        _reportExporter = new ClosedXmlReportExporter(_logger);
 
         Text = "Gestion de Fardos";
         StartPosition = FormStartPosition.CenterScreen;
-        Width = 800;
-        Height = 450;
+        MinimumSize = new Size(940, 600);
+        Size = new Size(940, 600);
+        BackColor = PageBackgroundColor;
 
         var titleLabel = new Label
         {
-            Text = "Sistema de Gestion de Fardos",
+            Text = "Gestion de Fardos",
             AutoSize = true,
-            Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-            Location = new Point(20, 20)
+            Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(24, 31, 38),
+            Location = new Point(28, 24)
         };
 
-        var skeletonLabel = new Label
+        var subtitleLabel = new Label
         {
-            Text = "Pantalla principal fuera de alcance en Etapa 1",
+            Text = "Operacion en linea con captura automatica al pulsador",
             AutoSize = true,
             Font = new Font("Segoe UI", 10F, FontStyle.Regular),
-            Location = new Point(20, 70)
+            ForeColor = MutedColor,
+            Location = new Point(31, 62)
         };
 
+        Panel weightPanel = BuildCard(new Point(28, 100), new Size(392, 188));
+        Panel capturePanel = BuildCard(new Point(444, 100), new Size(452, 188));
+        Panel recordPanel = BuildCard(new Point(28, 308), new Size(392, 192));
+        Panel actionsPanel = BuildCard(new Point(444, 308), new Size(452, 192));
+
+        var weightTitleLabel = BuildSectionTitle("Peso actual", new Point(22, 20));
+        _scaleConnectionLabel = new Label
+        {
+            Text = "Balanza: --",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            ForeColor = MutedColor,
+            Location = new Point(22, 56)
+        };
+
+        _weightUpdatedAtLabel = new Label
+        {
+            Text = "Ultima actualizacion: --",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+            ForeColor = MutedColor,
+            Location = new Point(22, 82)
+        };
+
+        _currentWeightValueLabel = new Label
+        {
+            Text = "-- kg",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 34F, FontStyle.Bold),
+            ForeColor = AccentColor,
+            Location = new Point(22, 112)
+        };
+
+        weightPanel.Controls.Add(weightTitleLabel);
+        weightPanel.Controls.Add(_scaleConnectionLabel);
+        weightPanel.Controls.Add(_weightUpdatedAtLabel);
+        weightPanel.Controls.Add(_currentWeightValueLabel);
+
+        var captureTitleLabel = BuildSectionTitle("Ultima opresion", new Point(22, 20));
+        _captureStatusLabel = new Label
+        {
+            Text = "Esperando pulsador",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 14F, FontStyle.Bold),
+            ForeColor = MutedColor,
+            Location = new Point(22, 58)
+        };
+
+        _captureMessageLabel = new Label
+        {
+            Text = "--",
+            AutoSize = false,
+            Size = new Size(408, 52),
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+            ForeColor = Color.FromArgb(34, 41, 47),
+            Location = new Point(22, 94)
+        };
+
+        _lastCaptureAtLabel = new Label
+        {
+            Text = "Momento de captura: --",
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+            ForeColor = MutedColor,
+            Location = new Point(22, 154)
+        };
+
+        capturePanel.Controls.Add(captureTitleLabel);
+        capturePanel.Controls.Add(_captureStatusLabel);
+        capturePanel.Controls.Add(_captureMessageLabel);
+        capturePanel.Controls.Add(_lastCaptureAtLabel);
+
+        var recordTitleLabel = BuildSectionTitle("Ultimo registro guardado", new Point(22, 20));
+        _lastRecordLabel = new Label
+        {
+            Text = "--",
+            AutoSize = false,
+            Size = new Size(348, 108),
+            Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+            ForeColor = Color.FromArgb(34, 41, 47),
+            Location = new Point(22, 58)
+        };
+
+        recordPanel.Controls.Add(recordTitleLabel);
+        recordPanel.Controls.Add(_lastRecordLabel);
+
+        var actionsTitleLabel = BuildSectionTitle("Acciones", new Point(22, 20));
+        var actionsDescriptionLabel = new Label
+        {
+            Text = "La edicion y la exportacion ya quedan disponibles desde esta pantalla principal.",
+            AutoSize = false,
+            Size = new Size(408, 48),
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+            ForeColor = MutedColor,
+            Location = new Point(22, 56)
+        };
+
+        _editRecordButton = new Button
+        {
+            Text = "Editar registro",
+            Size = new Size(188, 44),
+            Location = new Point(22, 118),
+            BackColor = AccentColor,
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            UseVisualStyleBackColor = false
+        };
+        _editRecordButton.FlatAppearance.BorderSize = 0;
+        _editRecordButton.Click += (_, _) => HandleEditRecordRequested();
+
+        _exportButton = new Button
+        {
+            Text = "Exportar a Excel",
+            Size = new Size(188, 44),
+            Location = new Point(242, 118),
+            BackColor = Color.FromArgb(233, 239, 244),
+            ForeColor = Color.FromArgb(34, 41, 47),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+            UseVisualStyleBackColor = false
+        };
+        _exportButton.FlatAppearance.BorderColor = Color.FromArgb(209, 216, 223);
+        _exportButton.FlatAppearance.BorderSize = 1;
+        _exportButton.Click += async (_, _) => await HandleExportRequestedAsync();
+
+        actionsPanel.Controls.Add(actionsTitleLabel);
+        actionsPanel.Controls.Add(actionsDescriptionLabel);
+        actionsPanel.Controls.Add(_editRecordButton);
+        actionsPanel.Controls.Add(_exportButton);
+
         Controls.Add(titleLabel);
-        Controls.Add(skeletonLabel);
+        Controls.Add(subtitleLabel);
+        Controls.Add(weightPanel);
+        Controls.Add(capturePanel);
+        Controls.Add(recordPanel);
+        Controls.Add(actionsPanel);
+
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = 200 };
+        _refreshTimer.Tick += (_, _) => RefreshOperationData();
 
         Load += OnMainFormLoad;
         FormClosed += OnMainFormClosed;
     }
 
-    private AppSettings LoadAppSettings()
+    private (AppSettings Settings, bool WasLoadedSuccessfully) LoadAppSettings()
     {
         var configLoader = new ConfigLoader();
 
         try
         {
             AppSettings settings = configLoader.Load(AppContext.BaseDirectory);
-            _logger.Log(AppLogLevel.Info, "CONFIG", $"Configuracion cargada desde {_configPath}.");
-            return settings;
+
+            if (_configFileExists)
+            {
+                _logger.Log(AppLogLevel.Info, "CONFIG", $"Configuracion cargada desde {_configPath}.");
+            }
+            else
+            {
+                _logger.Log(AppLogLevel.Warning, "CONFIG", $"No se encontro config.json en {_configPath}. La app usara valores por defecto.");
+            }
+
+            return (settings, true);
         }
         catch (Exception ex)
         {
@@ -79,19 +255,292 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
 
-            return new AppSettings();
+            return (new AppSettings(), false);
+        }
+    }
+
+    private IWeighingRepository? EnsureDatabaseReady()
+    {
+        if (!_configFileExists || !_configLoadedSuccessfully)
+        {
+            _logger.Log(AppLogLevel.Warning, "DB", "La base local no se inicializa porque config.json no esta disponible o no se pudo cargar correctamente.");
+            return null;
+        }
+
+        try
+        {
+            var repository = new SqliteWeighingRepository(AppContext.BaseDirectory, _settings.Database, _logger);
+            repository.InitializeAsync().GetAwaiter().GetResult();
+            _logger.Log(AppLogLevel.Info, "DB", $"Repositorio local preparado en {repository.GetDatabasePath()}.");
+            return repository;
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(AppLogLevel.Error, "DB", $"No se pudo inicializar la base local: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo inicializar la base local de pesadas.\n" +
+                $"Detalle: {ex.Message}\n\n" +
+                "La aplicacion continuara abierta, pero la persistencia local queda pendiente de revision.",
+                "Advertencia de base local",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            return null;
         }
     }
 
     private void OnMainFormLoad(object? sender, EventArgs e)
     {
         RegisterServiceHotkeys();
+        _weighingRuntime.Start();
+        RefreshOperationData();
+        _refreshTimer.Start();
     }
 
     private void OnMainFormClosed(object? sender, FormClosedEventArgs e)
     {
+        _refreshTimer.Stop();
+        _weighingRuntime.Stop();
         UnregisterHotKey(Handle, HotkeyIdCtrlShiftS);
         UnregisterHotKey(Handle, HotkeyIdCtrlAltShiftS);
+    }
+
+    private void RefreshOperationData()
+    {
+        WeighingRuntimeSnapshot snapshot = _weighingRuntime.GetOperationSnapshot();
+
+        _currentWeightValueLabel.Text = snapshot.CurrentWeightKg.HasValue
+            ? $"{snapshot.CurrentWeightKg.Value:F2} kg"
+            : "-- kg";
+        _currentWeightValueLabel.ForeColor = snapshot.ScaleIsConnected && snapshot.CurrentWeightKg.HasValue
+            ? AccentColor
+            : MutedColor;
+
+        _scaleConnectionLabel.Text = snapshot.ScaleIsConnected
+            ? "Balanza conectada"
+            : "Balanza desconectada";
+        _scaleConnectionLabel.ForeColor = snapshot.ScaleIsConnected ? AccentColor : ErrorColor;
+
+        _weightUpdatedAtLabel.Text = snapshot.UpdatedAt == DateTime.MinValue
+            ? "Ultima actualizacion: --"
+            : $"Ultima actualizacion: {snapshot.UpdatedAt:dd/MM/yyyy HH:mm:ss.fff}";
+
+        _captureStatusLabel.Text = FormatCaptureStatus(snapshot.LastCaptureStatus);
+        _captureStatusLabel.ForeColor = ResolveCaptureStatusColor(snapshot.LastCaptureStatus);
+        _captureMessageLabel.Text = FormatValue(snapshot.LastCaptureMessage);
+        _lastCaptureAtLabel.Text = snapshot.LastCaptureAt.HasValue
+            ? $"Momento de captura: {snapshot.LastCaptureAt.Value:dd/MM/yyyy HH:mm:ss.fff}"
+            : "Momento de captura: --";
+
+        _lastRecordLabel.Text = snapshot.LastSavedRecord is null
+            ? "Aun no hay pesadas guardadas en la base local."
+            : $"Numero: {snapshot.LastSavedRecord.Id}\nFecha: {snapshot.LastSavedRecord.Timestamp:dd/MM/yyyy}\nHora: {snapshot.LastSavedRecord.Timestamp:HH:mm:ss}\nPeso: {snapshot.LastSavedRecord.WeightKg:F2} kg";
+    }
+
+    private void ShowFeaturePendingMessage(string featureName, string message)
+    {
+        _logger.Log(AppLogLevel.Info, "UI", $"{featureName} seleccionado en pantalla principal. Pendiente de implementacion.");
+
+        MessageBox.Show(
+            message,
+            featureName,
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    private void HandleEditRecordRequested()
+    {
+        if (_weighingRepository is null)
+        {
+            _logger.Log(AppLogLevel.Warning, "EDIT", "No se puede editar una pesada porque la base local no esta disponible.");
+
+            MessageBox.Show(
+                "La base local no esta disponible.\n" +
+                "Revise la configuracion y el acceso al archivo de base antes de editar registros.",
+                "Edicion no disponible",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.Passwords.Edit))
+        {
+            _logger.Log(AppLogLevel.Warning, "EDIT", "Passwords.Edit esta vacio en config.json.");
+
+            MessageBox.Show(
+                "El campo Passwords.Edit esta vacio en config.json.\n" +
+                "Configure una contrasena de edicion para habilitar este flujo.",
+                "Edicion bloqueada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        long selectedRecordId = 0;
+
+        try
+        {
+            WeighingRecord? latestRecord = _weighingRepository.GetLatestAsync().GetAwaiter().GetResult();
+            if (latestRecord is null)
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", "No hay pesadas guardadas para editar.");
+
+                MessageBox.Show(
+                    "Aun no hay pesadas guardadas en la base local.",
+                    "Sin registros para editar",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var prompt = new EditRecordPromptForm(latestRecord.Id);
+            DialogResult dialogResult = prompt.ShowDialog(this);
+            if (dialogResult != DialogResult.OK)
+            {
+                return;
+            }
+
+            selectedRecordId = prompt.SelectedRecordId;
+
+            if (!string.Equals(prompt.EnteredPassword, _settings.Passwords.Edit, StringComparison.Ordinal))
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", $"Intento de edicion rechazado para la pesada {selectedRecordId} por contrasena incorrecta.");
+
+                MessageBox.Show(
+                    "La contrasena de edicion es incorrecta.",
+                    "Edicion denegada",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            bool wasUpdated = _weighingRepository.SetWeightToZeroAsync(selectedRecordId, DateTime.Now).GetAwaiter().GetResult();
+            if (!wasUpdated)
+            {
+                _logger.Log(AppLogLevel.Warning, "EDIT", $"La pesada {selectedRecordId} no pudo editarse porque no hubo filas afectadas.");
+
+                MessageBox.Show(
+                    $"No se pudo editar la pesada {selectedRecordId}.",
+                    "Edicion no aplicada",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            _weighingRuntime.RefreshLastSavedRecord();
+            RefreshOperationData();
+
+            _logger.Log(AppLogLevel.Info, "EDIT", $"La pesada {selectedRecordId} fue puesta en cero correctamente.");
+
+            MessageBox.Show(
+                $"La pesada {selectedRecordId} fue puesta en cero correctamente.",
+                "Edicion aplicada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            string recordSegment = selectedRecordId > 0 ? $" la pesada {selectedRecordId}" : " el registro solicitado";
+            _logger.Log(AppLogLevel.Error, "EDIT", $"No se pudo editar{recordSegment}: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo editar el registro solicitado.\n" +
+                $"Detalle: {ex.Message}",
+                "Error de edicion",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task HandleExportRequestedAsync()
+    {
+        if (_exportInProgress)
+        {
+            return;
+        }
+
+        if (_weighingRepository is null)
+        {
+            _logger.Log(AppLogLevel.Warning, "EXPORT", "No se puede exportar porque la base local no esta disponible.");
+
+            MessageBox.Show(
+                "La base local no esta disponible.\n" +
+                "Revise la configuracion y el acceso al archivo de base antes de exportar registros.",
+                "Exportacion no disponible",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        string exportDirectory = ResolveExportDirectory();
+
+        using var prompt = new ExportDateRangePromptForm(exportDirectory);
+        DialogResult dialogResult = prompt.ShowDialog(this);
+        if (dialogResult != DialogResult.OK)
+        {
+            return;
+        }
+
+        if (prompt.ToDate < prompt.FromDate)
+        {
+            _logger.Log(AppLogLevel.Warning, "EXPORT", $"Rango invalido solicitado. Desde={prompt.FromDate:dd/MM/yyyy}, Hasta={prompt.ToDate:dd/MM/yyyy}.");
+
+            MessageBox.Show(
+                "La fecha final no puede ser menor a la fecha inicial.",
+                "Rango invalido",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            SetExportUiState(true);
+
+            DateTime fromInclusive = prompt.FromDate.Date;
+            DateTime toInclusive = prompt.ToDate.Date.AddDays(1).AddTicks(-1);
+
+            IReadOnlyList<WeighingRecord> records = await _weighingRepository.ListByDateRangeAsync(fromInclusive, toInclusive);
+
+            if (records.Count == 0)
+            {
+                _logger.Log(AppLogLevel.Info, "EXPORT", $"No hay registros para exportar en el rango {prompt.FromDate:dd/MM/yyyy} - {prompt.ToDate:dd/MM/yyyy}.");
+
+                MessageBox.Show(
+                    "No hay pesadas guardadas dentro del rango seleccionado.",
+                    "Sin datos para exportar",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            string outputPath = BuildExportFilePath(exportDirectory, prompt.FromDate, prompt.ToDate);
+            await _reportExporter.ExportAsync(records, outputPath);
+
+            _logger.Log(AppLogLevel.Info, "EXPORT", $"Exportacion finalizada. Archivo={outputPath}, Registros={records.Count}.");
+
+            MessageBox.Show(
+                $"Se exportaron {records.Count} registros correctamente.\n\nArchivo generado:\n{outputPath}",
+                "Exportacion completada",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.Log(AppLogLevel.Error, "EXPORT", $"No se pudo exportar a Excel: {ex.Message}");
+
+            MessageBox.Show(
+                "No se pudo generar el archivo Excel solicitado.\n" +
+                $"Detalle: {ex.Message}",
+                "Error de exportacion",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetExportUiState(false);
+        }
     }
 
     private void RegisterServiceHotkeys()
@@ -181,8 +630,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        var servicePortMonitor = new SerialServicePortMonitor(_settings.Scale, _settings.Button, _logger);
-        _serviceForm = new ServiceForm(servicePortMonitor);
+        _serviceForm = new ServiceForm(_weighingRuntime, _weighingRepository, _logger);
         _serviceForm.FormClosed += (_, _) =>
         {
             _logger.Log(AppLogLevel.Info, "SERVICE", "Modo Service cerrado.");
@@ -223,6 +671,86 @@ public sealed class MainForm : Form
         }
 
         return true;
+    }
+
+    private static Panel BuildCard(Point location, Size size)
+    {
+        return new Panel
+        {
+            Location = location,
+            Size = size,
+            BackColor = CardColor,
+            BorderStyle = BorderStyle.FixedSingle
+        };
+    }
+
+    private static Label BuildSectionTitle(string text, Point location)
+    {
+        return new Label
+        {
+            Text = text,
+            AutoSize = true,
+            Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(24, 31, 38),
+            Location = location
+        };
+    }
+
+    private static string FormatCaptureStatus(WeighingCaptureStatus status)
+    {
+        return status switch
+        {
+            WeighingCaptureStatus.Idle => "Esperando pulsador",
+            WeighingCaptureStatus.Saved => "Pesada guardada",
+            WeighingCaptureStatus.RejectedNoWeight => "Rechazada sin peso valido",
+            WeighingCaptureStatus.RejectedOutOfRange => "Rechazada fuera de rango",
+            WeighingCaptureStatus.SaveError => "Error de guardado",
+            _ => "--"
+        };
+    }
+
+    private static Color ResolveCaptureStatusColor(WeighingCaptureStatus status)
+    {
+        return status switch
+        {
+            WeighingCaptureStatus.Saved => AccentColor,
+            WeighingCaptureStatus.RejectedNoWeight => WarningColor,
+            WeighingCaptureStatus.RejectedOutOfRange => WarningColor,
+            WeighingCaptureStatus.SaveError => ErrorColor,
+            _ => MutedColor
+        };
+    }
+
+    private static string FormatValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "--" : value;
+    }
+
+    private string ResolveExportDirectory()
+    {
+        string configuredFolder = string.IsNullOrWhiteSpace(_settings.Export.Folder)
+            ? "exports"
+            : _settings.Export.Folder.Trim();
+
+        return Path.IsPathRooted(configuredFolder)
+            ? Path.GetFullPath(configuredFolder)
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, configuredFolder));
+    }
+
+    private static string BuildExportFilePath(string exportDirectory, DateTime fromDate, DateTime toDate)
+    {
+        string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string fileName = $"pesadas_desde_{fromDate:yyyyMMdd}_hasta_{toDate:yyyyMMdd}_hecha_{timestamp}.xlsx";
+        return Path.Combine(exportDirectory, fileName);
+    }
+
+    private void SetExportUiState(bool isExporting)
+    {
+        _exportInProgress = isExporting;
+        _exportButton.Enabled = !isExporting;
+        _editRecordButton.Enabled = !isExporting;
+        UseWaitCursor = isExporting;
+        Cursor.Current = isExporting ? Cursors.WaitCursor : Cursors.Default;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

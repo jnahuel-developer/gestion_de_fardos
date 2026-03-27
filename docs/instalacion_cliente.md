@@ -2,7 +2,7 @@
 
 ## Alcance de esta entrega
 
-Esta entrega corresponde a la version final operativa `1.1.0` de Gestion de Fardos.
+Esta entrega corresponde a la version final operativa `2.0.0` de Gestion de Fardos.
 
 Incluye:
 
@@ -15,7 +15,7 @@ Incluye:
 
 ## Instalacion
 
-1. Ejecutar el instalador `GestionDeFardos-Setup-1.1.0-x64.exe`.
+1. Ejecutar el instalador `GestionDeFardos-Setup-2.0.0-x64.exe`.
 2. Confirmar la carpeta de destino.
 3. Finalizar la instalacion.
 4. Abrir la carpeta instalada.
@@ -25,7 +25,7 @@ Incluye:
 Antes de usar la app por primera vez:
 
 1. Abrir `config.json`.
-2. Completar `Scale` con el puerto y perfil de la balanza.
+2. Completar `Scale` con el puerto, perfil y posicion decimal de la balanza.
 3. Completar `Button` con el puerto y perfil del pulsador.
 4. Revisar `Database.FilePath`.
 5. Revisar `Thresholds`.
@@ -37,6 +37,8 @@ Antes de usar la app por primera vez:
 Notas:
 
 - `Scale.Protocol` define el formato de datos, no la configuracion fisica del puerto.
+- `Scale.WeightDecimalDigits` define cuantos digitos quedan a la derecha de la coma para el peso.
+- `Scale.TareDecimalDigits` define cuantos digitos quedan a la derecha de la coma para la tara.
 - El valor recomendado por default es `w180-t`.
 - Si cambia `config.json`, hay que cerrar y volver a abrir la aplicacion.
 

@@ -21,6 +21,8 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
     private readonly List<byte> _scaleBuffer = [];
     private readonly List<byte> _buttonBuffer = [];
     private readonly string _configuredScaleProtocol;
+    private readonly int _weightDecimalDigits;
+    private readonly int _tareDecimalDigits;
     private readonly IScaleProtocol? _scaleProtocol;
 
     private ServicePortSnapshot _snapshot = new();
@@ -46,6 +48,8 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
         _thresholdSettings = thresholdSettings;
         _weighingRepository = weighingRepository;
         _logger = logger;
+        _weightDecimalDigits = WeightConversionHelper.NormalizeDecimalDigits(scaleSettings.WeightDecimalDigits);
+        _tareDecimalDigits = WeightConversionHelper.NormalizeDecimalDigits(scaleSettings.TareDecimalDigits);
         _configuredScaleProtocol = string.IsNullOrWhiteSpace(scaleSettings.Protocol)
             ? string.Empty
             : scaleSettings.Protocol.Trim();
@@ -53,6 +57,16 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
         if (ScaleProtocolCatalog.TryResolve(_configuredScaleProtocol, out IScaleProtocol? scaleProtocol))
         {
             _scaleProtocol = scaleProtocol;
+        }
+
+        if (_weightDecimalDigits != scaleSettings.WeightDecimalDigits)
+        {
+            _logger.Log(AppLogLevel.Warning, "CONFIG", $"Scale.WeightDecimalDigits={scaleSettings.WeightDecimalDigits} no es valido. Se usara {_weightDecimalDigits}.");
+        }
+
+        if (_tareDecimalDigits != scaleSettings.TareDecimalDigits)
+        {
+            _logger.Log(AppLogLevel.Warning, "CONFIG", $"Scale.TareDecimalDigits={scaleSettings.TareDecimalDigits} no es valido. Se usara {_tareDecimalDigits}.");
         }
     }
 
@@ -76,6 +90,10 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
                 AppLogLevel.Info,
                 "SERVICE",
                 $"Iniciando runtime compartido. ProtocoloBalanza={DisplayScaleProtocol()}, PerfilBalanza={_snapshot.ScalePortProfile}, PerfilPulsador={_snapshot.ButtonPortProfile}.");
+            _logger.Log(
+                AppLogLevel.Info,
+                "SCALE",
+                $"Configuracion de coma interpretada. DecimalesPeso={_weightDecimalDigits}, DecimalesTara={_tareDecimalDigits}.");
 
             OpenScalePort();
             OpenButtonPort();
@@ -122,6 +140,7 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
                 RawGrams = _snapshot.RawGrams,
                 RawTareGrams = _snapshot.RawTareGrams,
                 WeightKg = _snapshot.WeightKg,
+                TareKg = _snapshot.TareKg,
                 UpdatedAt = _snapshot.UpdatedAt,
                 IsConnected = _snapshot.IsConnected,
                 LastError = _snapshot.LastError,
@@ -178,6 +197,7 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
             RawGrams = null,
             RawTareGrams = null,
             WeightKg = null,
+            TareKg = null,
             UpdatedAt = DateTime.Now,
             IsConnected = false,
             LastError = scaleProtocolError,
@@ -685,13 +705,17 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
     private void ApplyScaleFrame(ScaleDecodedFrame frame)
     {
         decimal? kilograms = frame.WeightGrams.HasValue
-            ? WeightConversionHelper.GramsToKg(frame.WeightGrams.Value)
+            ? WeightConversionHelper.RawValueToKg(frame.WeightGrams.Value, _weightDecimalDigits)
+            : null;
+        decimal? tareKg = frame.TareGrams.HasValue
+            ? WeightConversionHelper.RawValueToKg(frame.TareGrams.Value, _tareDecimalDigits)
             : null;
 
         _snapshot.ScaleLastDecodedFrame = frame.DisplayFrame;
         _snapshot.RawGrams = frame.WeightGrams;
         _snapshot.RawTareGrams = frame.TareGrams;
         _snapshot.WeightKg = kilograms;
+        _snapshot.TareKg = tareKg;
         _snapshot.IsConnected = true;
         _snapshot.LastError = null;
         _snapshot.UpdatedAt = DateTime.Now;
@@ -701,9 +725,11 @@ public sealed class SerialServicePortMonitor : IWeighingRuntime
         _operationSnapshot.CurrentWeightKg = kilograms;
         _operationSnapshot.UpdatedAt = DateTime.Now;
 
-        string tareSegment = frame.TareGrams.HasValue ? $", TaraGramos={frame.TareGrams.Value}" : string.Empty;
+        string tareSegment = frame.TareGrams.HasValue && tareKg.HasValue
+            ? $", TaraRaw={frame.TareGrams.Value}, TaraKg={tareKg.Value:F3}, DecimalesTara={_tareDecimalDigits}"
+            : string.Empty;
         string weightSegment = frame.WeightGrams.HasValue && kilograms.HasValue
-            ? $"Gramos={frame.WeightGrams.Value}, Kg={kilograms.Value:F3}"
+            ? $"ValorRaw={frame.WeightGrams.Value}, Kg={kilograms.Value:F3}, DecimalesPeso={_weightDecimalDigits}"
             : "Sin peso numerico";
 
         _logger.Log(

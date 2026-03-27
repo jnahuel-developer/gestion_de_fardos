@@ -1,0 +1,350 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{setspace}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\setlist[itemize]{leftmargin=1.5em}
+\setlist[enumerate]{leftmargin=1.8em}
+\onehalfspacing
+
+\begin{document}
+
+\begin{center}
+{\Large \textbf{Documentaci\'on t\'ecnica}}\\[0.5cm]
+{\LARGE \textbf{Instructivo para el cliente}}\\[0.8cm]
+{\large Martinez, Nahuel}\\[0.2cm]
+{\normalsize \texttt{jnahuel.developer@gmail.com}}\\[0.2cm]
+{\normalsize 27/03/2026}
+\end{center}
+
+\vspace{0.8cm}
+
+\section*{1. Objetivo}
+
+Este documento explica c\'omo funciona la aplicaci\'on \textbf{Gesti\'on de Fardos}, qu\'e opciones de configuraci\'on utiliza y cu\'ales son las funciones disponibles para la operaci\'on diaria.
+
+La idea es que el usuario pueda:
+
+\begin{itemize}
+\item entender qu\'e hace el sistema;
+\item configurar correctamente la balanza y el pulsador;
+\item operar la pantalla principal;
+\item acceder al modo t\'ecnico cuando sea necesario;
+\item identificar d\'onde quedan guardados los registros y los archivos exportados.
+\end{itemize}
+
+\section*{2. L\'ogica general del programa}
+
+La aplicaci\'on trabaja con dos dispositivos conectados por puertos serie:
+
+\begin{itemize}
+\item \textbf{Balanza}: env\'ia continuamente el peso.
+\item \textbf{Pulsador}: al presionarse, env\'ia la trama \texttt{\$P1!}.
+\end{itemize}
+
+La l\'ogica de funcionamiento es la siguiente:
+
+\begin{enumerate}
+\item La aplicaci\'on lee el peso actual enviado por la balanza.
+\item Cuando el pulsador env\'ia \texttt{\$P1!}, la aplicaci\'on responde \texttt{\$B1!}.
+\item En ese momento toma el \'ultimo peso v\'alido disponible.
+\item Si el peso est\'a dentro del rango permitido, se guarda un registro en la base local.
+\item Si el peso est\'a fuera de rango o no hay una lectura v\'alida, la captura se rechaza y se informa en pantalla.
+\end{enumerate}
+
+De esta forma, la balanza informa el peso y el pulsador define el momento exacto en el que se debe registrar la pesada.
+
+\section*{3. Funciones disponibles}
+
+\subsection*{3.1 Pantalla principal}
+
+La pantalla principal muestra:
+
+\begin{itemize}
+\item el peso actual;
+\item el estado de la \'ultima opresi\'on del pulsador;
+\item el \'ultimo registro guardado;
+\item el acceso a edici\'on de registros;
+\item el acceso a exportaci\'on a Excel.
+\end{itemize}
+
+\subsection*{3.2 Guardado autom\'atico}
+
+Cada vez que el pulsador env\'ia \texttt{\$P1!}, la aplicaci\'on intenta guardar una pesada.
+
+El guardado solo se realiza si:
+
+\begin{itemize}
+\item la balanza entreg\'o un valor interpretable;
+\item el peso est\'a dentro del rango configurado.
+\end{itemize}
+
+\subsection*{3.3 Edici\'on de registros}
+
+Desde la pantalla principal se puede editar una pesada ya guardada.
+
+El flujo es:
+
+\begin{enumerate}
+\item presionar \textbf{Editar registro};
+\item elegir el n\'umero de pesada;
+\item ingresar la contrase\~na de edici\'on;
+\item confirmar la operaci\'on.
+\end{enumerate}
+
+Al editar una pesada:
+
+\begin{itemize}
+\item el registro no se elimina;
+\item el peso queda en \texttt{0};
+\item la modificaci\'on queda registrada.
+\end{itemize}
+
+\subsection*{3.4 Exportaci\'on a Excel}
+
+Desde la pantalla principal se puede exportar un rango de fechas a un archivo \texttt{.xlsx}.
+
+La exportaci\'on incluye:
+
+\begin{itemize}
+\item n\'umero de fardo;
+\item d\'ia;
+\item hora;
+\item kg.
+\end{itemize}
+
+Los archivos se guardan en la carpeta definida en la configuraci\'on.
+
+\subsection*{3.5 Modo Service}
+
+El modo Service permite realizar diagn\'ostico t\'ecnico.
+
+Se abre con:
+
+\begin{itemize}
+\item \texttt{Ctrl + Shift + S}
+\item \texttt{Ctrl + Alt + Shift + S}
+\end{itemize}
+
+Sus funciones principales son:
+
+\begin{itemize}
+\item ver el estado de conexi\'on de balanza y pulsador;
+\item ver datos recibidos en crudo;
+\item ver la interpretaci\'on del peso y la tara;
+\item revisar errores de comunicaci\'on;
+\item borrar registros hist\'oricos por fecha.
+\end{itemize}
+
+\section*{4. Archivo de configuraci\'on}
+
+La aplicaci\'on utiliza un archivo llamado \texttt{config.json}, ubicado junto al ejecutable.
+
+Si se modifica este archivo, es necesario cerrar y volver a abrir la aplicaci\'on.
+
+\subsection*{4.1 Estructura general}
+
+Las secciones principales son:
+
+\begin{itemize}
+\item \texttt{Scale}
+\item \texttt{Button}
+\item \texttt{Database}
+\item \texttt{Thresholds}
+\item \texttt{Passwords}
+\item \texttt{Export}
+\end{itemize}
+
+\subsection*{4.2 Configuraci\'on de la balanza}
+
+La secci\'on \texttt{Scale} define dos cosas:
+
+\begin{itemize}
+\item c\'omo abrir el puerto serie;
+\item c\'omo interpretar el dato recibido.
+\end{itemize}
+
+Campos principales:
+
+\begin{longtable}{|>{\raggedright\arraybackslash}p{4cm}|>{\raggedright\arraybackslash}p{10cm}|}
+\hline
+\textbf{Campo} & \textbf{Descripci\'on} \\
+\hline
+\texttt{Protocol} & Protocolo de datos de la balanza. Actualmente el valor recomendado es \texttt{w180-t}. \\
+\hline
+\texttt{PortName} & Puerto COM de la balanza. \\
+\hline
+\texttt{BaudRate} & Velocidad del puerto serie. \\
+\hline
+\texttt{DataBits} & Cantidad de bits de datos. \\
+\hline
+\texttt{Parity} & Paridad del puerto. \\
+\hline
+\texttt{StopBits} & Bits de stop. \\
+\hline
+\texttt{Handshake} & Control de flujo. \\
+\hline
+\texttt{NewLine} & Solo aplica si se usa un protocolo por l\'inea, como \texttt{simple-ascii}. \\
+\hline
+\texttt{WeightDecimalDigits} & Define cu\'antos d\'igitos del valor recibido corresponden a la parte decimal del peso. \\
+\hline
+\texttt{TareDecimalDigits} & Define cu\'antos d\'igitos del valor recibido corresponden a la parte decimal de la tara. \\
+\hline
+\end{longtable}
+
+\subsection*{4.3 Importancia de \texttt{WeightDecimalDigits} y \texttt{TareDecimalDigits}}
+
+La balanza entrega el valor como una secuencia de d\'igitos enteros, por ejemplo:
+
+\begin{itemize}
+\item \texttt{099500}
+\item \texttt{100250}
+\item \texttt{000000}
+\end{itemize}
+
+Como el equipo no informa d\'onde est\'a la coma decimal, la aplicaci\'on ahora lo toma desde configuraci\'on.
+
+Ejemplos:
+
+\begin{itemize}
+\item si \texttt{WeightDecimalDigits = 3}, el valor \texttt{099500} se interpreta como \texttt{99,500 kg};
+\item si \texttt{WeightDecimalDigits = 2}, el valor \texttt{099500} se interpreta como \texttt{995,00 kg}.
+\end{itemize}
+
+Lo mismo aplica para la tara mediante \texttt{TareDecimalDigits}.
+
+\subsection*{4.4 Configuraci\'on del pulsador}
+
+La secci\'on \texttt{Button} define el puerto del pulsador.
+
+Campos principales:
+
+\begin{itemize}
+\item \texttt{PortName}
+\item \texttt{BaudRate}
+\item \texttt{DataBits}
+\item \texttt{Parity}
+\item \texttt{StopBits}
+\item \texttt{Handshake}
+\end{itemize}
+
+El pulsador debe usar un puerto distinto al de la balanza.
+
+\subsection*{4.5 Base local}
+
+La secci\'on \texttt{Database} define la ubicaci\'on del archivo de base SQLite:
+
+\begin{itemize}
+\item \texttt{FilePath}
+\end{itemize}
+
+All\'i quedan guardadas las pesadas.
+
+\subsection*{4.6 Rango de pesos}
+
+La secci\'on \texttt{Thresholds} define el rango v\'alido de guardado:
+
+\begin{itemize}
+\item \texttt{MinKg}
+\item \texttt{MaxKg}
+\end{itemize}
+
+Si una pesada queda fuera de ese rango, no se registra.
+
+\subsection*{4.7 Contrase\~nas}
+
+La secci\'on \texttt{Passwords} contiene:
+
+\begin{itemize}
+\item \texttt{Edit}: contrase\~na para editar registros;
+\item \texttt{Service}: contrase\~na para ingresar al modo Service.
+\end{itemize}
+
+\subsection*{4.8 Carpeta de exportaci\'on}
+
+La secci\'on \texttt{Export} define:
+
+\begin{itemize}
+\item \texttt{Folder}: carpeta donde se generan los archivos Excel.
+\end{itemize}
+
+\section*{5. Ejemplo de configuraci\'on}
+
+\begin{verbatim}
+"Scale": {
+  "Protocol": "w180-t",
+  "PortName": "COM4",
+  "BaudRate": 9600,
+  "DataBits": 7,
+  "Parity": "Even",
+  "StopBits": "Two",
+  "Handshake": "None",
+  "NewLine": "\n",
+  "WeightDecimalDigits": 3,
+  "TareDecimalDigits": 3
+}
+\end{verbatim}
+
+\section*{6. Recomendaciones de uso}
+
+\begin{itemize}
+\item Verificar siempre los puertos COM antes de iniciar la aplicaci\'on.
+\item Confirmar que la configuraci\'on serial coincide con la del hardware.
+\item Ajustar correctamente \texttt{WeightDecimalDigits} y \texttt{TareDecimalDigits} seg\'un la balanza instalada.
+\item Revisar los logs si no se reciben datos o si una pesada no se guarda.
+\item No modificar directamente la base local salvo por necesidad t\'ecnica.
+\end{itemize}
+
+\section*{7. Logs y diagn\'ostico}
+
+La aplicaci\'on genera logs en la carpeta:
+
+\begin{itemize}
+\item \texttt{logs}
+\end{itemize}
+
+Nombre del archivo:
+
+\begin{itemize}
+\item \texttt{gestion-de-fardos-YYYYMMDD.log}
+\end{itemize}
+
+All\'i se registran:
+
+\begin{itemize}
+\item inicio y cierre de la app;
+\item apertura y cierre de puertos;
+\item datos recibidos en crudo;
+\item interpretaci\'on de balanza;
+\item eventos del pulsador;
+\item guardados;
+\item ediciones;
+\item exportaciones;
+\item borrados hist\'oricos;
+\item errores.
+\end{itemize}
+
+\section*{8. Resumen final}
+
+La aplicaci\'on \textbf{Gesti\'on de Fardos} permite operar el proceso completo de captura:
+
+\begin{itemize}
+\item leer el peso de una balanza;
+\item registrar la pesada al presionar el pulsador;
+\item guardar el resultado en una base local;
+\item corregir registros;
+\item exportar datos a Excel;
+\item diagnosticar la comunicaci\'on desde un modo t\'ecnico.
+\end{itemize}
+
+La configuraci\'on m\'as importante para esta versi\'on es la interpretaci\'on decimal del peso y de la tara, ya que el equipo informa los valores como enteros de 6 d\'igitos y la posici\'on de la coma debe definirse manualmente en \texttt{config.json}.
+
+\end{document}

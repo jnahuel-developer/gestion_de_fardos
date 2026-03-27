@@ -18,6 +18,8 @@ Validar:
 
 - Verificar `config.json` valido.
 - Verificar `Scale.Protocol = "w180-t"` por default.
+- Verificar `Scale.WeightDecimalDigits`.
+- Verificar `Scale.TareDecimalDigits`.
 - Verificar `Database.FilePath`.
 - Verificar `Export.Folder`.
 - Verificar `Passwords.Edit`.

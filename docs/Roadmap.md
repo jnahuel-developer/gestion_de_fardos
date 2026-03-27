@@ -4,7 +4,7 @@
 
 - Etapa 1: completada
 - Etapa 2: completada
-- Version objetivo de cierre: `1.1.0`
+- Version objetivo de cierre: `2.0.0`
 
 ## Mods implementadas
 

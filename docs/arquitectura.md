@@ -32,6 +32,7 @@
 
 - Puerto propio.
 - Interpretacion por protocolo configurable.
+- Posicion decimal configurable para peso y tara desde `Scale`.
 - Protocolos soportados:
   - `w180-t`
   - `simple-ascii`

@@ -7,7 +7,9 @@
     "Parity": "Even",
     "StopBits": "Two",
     "Handshake": "None",
-    "NewLine": "\\n"
+    "NewLine": "\\n",
+    "WeightDecimalDigits": 3,
+    "TareDecimalDigits": 3
   },
   "Button": {
     "PortName": "COM4",

@@ -17,6 +17,11 @@ Al iniciar:
 - se abre el runtime compartido
 - se inician la balanza y el pulsador segun lo definido en `config.json`
 
+En `Scale` tambien se define la interpretacion decimal:
+
+- `WeightDecimalDigits`: digitos a la derecha de la coma para el peso
+- `TareDecimalDigits`: digitos a la derecha de la coma para la tara
+
 ## Pantalla principal
 
 La pantalla principal muestra:

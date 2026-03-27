@@ -20,6 +20,8 @@ public sealed class ScaleSettings
     public string StopBits { get; set; } = "Two";
     public string Handshake { get; set; } = "None";
     public string NewLine { get; set; } = "\n";
+    public int WeightDecimalDigits { get; set; } = 3;
+    public int TareDecimalDigits { get; set; } = 3;
 }
 
 public sealed class ButtonSettings

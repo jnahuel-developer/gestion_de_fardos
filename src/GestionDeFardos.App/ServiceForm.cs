@@ -297,11 +297,11 @@ public sealed class ServiceForm : Form
         _scaleErrorLabel.Text = string.IsNullOrWhiteSpace(snapshot.LastError)
             ? "Error / diagnostico: --"
             : $"Error / diagnostico: {snapshot.LastError}";
-        _weightLabel.Text = snapshot.RawGrams.HasValue
-            ? $"Peso interpretado: {WeightConversionHelper.GramsToKg(snapshot.RawGrams.Value):F2} kg"
+        _weightLabel.Text = snapshot.WeightKg.HasValue
+            ? $"Peso interpretado: {snapshot.WeightKg.Value:F2} kg"
             : "Peso interpretado: -- kg";
-        _tareLabel.Text = snapshot.RawTareGrams.HasValue
-            ? $"Tara interpretada: {WeightConversionHelper.GramsToKg(snapshot.RawTareGrams.Value):F2} kg"
+        _tareLabel.Text = snapshot.TareKg.HasValue
+            ? $"Tara interpretada: {snapshot.TareKg.Value:F2} kg"
             : "Tara interpretada: -- kg";
         _scaleRawTextBox.Text = string.IsNullOrWhiteSpace(snapshot.ScaleRawChunk) ? "--" : snapshot.ScaleRawChunk;
         _scaleDecodedTextBox.Text = string.IsNullOrWhiteSpace(snapshot.ScaleLastDecodedFrame) ? "--" : snapshot.ScaleLastDecodedFrame;

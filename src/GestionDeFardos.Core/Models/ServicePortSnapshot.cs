@@ -9,6 +9,7 @@ public sealed class ServicePortSnapshot
     public int? RawGrams { get; set; }
     public int? RawTareGrams { get; set; }
     public decimal? WeightKg { get; set; }
+    public decimal? TareKg { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.MinValue;
     public bool IsConnected { get; set; }
     public string? LastError { get; set; }

@@ -6,7 +6,7 @@ Aplicacion WinForms para captura de pesadas con balanza y pulsador seriales, per
 
 - Etapa 1 finalizada y validada en cliente.
 - Etapa 2 finalizada.
-- Version objetivo de entrega: `1.1.0`.
+- Version objetivo de entrega: `2.0.0`.
 
 ## Funcionalidad principal
 
@@ -39,7 +39,7 @@ La app lee `config.json` desde la carpeta del ejecutable al iniciar.
 
 Secciones relevantes:
 
-- `Scale`: puerto y protocolo de balanza.
+- `Scale`: puerto, protocolo y posicion de coma de balanza.
 - `Button`: puerto del pulsador.
 - `Database`: ruta del archivo SQLite.
 - `Thresholds`: rango valido de kg para guardar.
@@ -66,7 +66,7 @@ dotnet run --project src/GestionDeFardos.App/GestionDeFardos.App.csproj -c Debug
 
 ## Publicacion
 
-Publicacion self-contained x64 con defaults de la version `1.1.0`:
+Publicacion self-contained x64 con defaults de la version `2.0.0`:
 
 ```powershell
 scripts\release.cmd
@@ -93,7 +93,7 @@ scripts\build-installer.cmd
 
 Salida esperada:
 
-- `artifacts/dist/GestionDeFardos-Setup-1.1.0-x64.exe`
+- `artifacts/dist/GestionDeFardos-Setup-2.0.0-x64.exe`
 - `artifacts/dist/instalacion_cliente.md`
 
 Si `iscc` no esta disponible en el PATH, el script usa el bootstrapper integrado.
